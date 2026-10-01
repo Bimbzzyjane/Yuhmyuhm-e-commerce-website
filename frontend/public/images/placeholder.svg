@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900" role="img" aria-label="Yuhmyuhm Catering Services">
+  <!--
+    Branded stand-in used whenever a product photo is missing or fails to load.
+    Deliberately on-brand (cream + espresso + gold) so a missing image reads as
+    intentional rather than broken.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f4efe6" />
+      <stop offset="1" stop-color="#e9e0d3" />
+    </linearGradient>
+  </defs>
+
+  <rect width="900" height="900" fill="url(#bg)" />
+  <rect x="24" y="24" width="852" height="852" fill="none" stroke="#d8cbb8" stroke-width="2" rx="10" />
+
+  <g transform="translate(450 400)" fill="none" stroke="#2a1a10" stroke-width="9"
+     stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="-52" r="46" />
+    <path d="M-46 -14a38 38 0 0 1 0 -76" />
+    <path d="M46 -14a38 38 0 0 0 0 -76" />
+    <path d="M-46 -14h92v96a10 10 0 0 1-10 10h-72a10 10 0 0 1-10-10z" />
+    <path d="M-18 92v-42M18 92v-42" />
+  </g>
+
+  <text x="450" y="640" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif"
+        font-size="58" letter-spacing="14" fill="#2a1a10">YUHMYUHM</text>
+  <text x="450" y="690" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
+        font-size="21" letter-spacing="9" fill="#a8912f">CATERING SERVICES</text>
+</svg>

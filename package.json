@@ -1,0 +1,33 @@
+{
+  "name": "yuhmyuhm-catering",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Yuhmyuhm Catering Services - e-commerce storefront (Next.js) + commerce API (Express/TypeScript/Supabase).",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev --workspace backend",
+    "dev:web": "npm run dev --workspace frontend",
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "start": "npm run start --workspace backend",
+    "test": "npm run test --workspace backend",
+    "test:watch": "npm run test:watch --workspace backend",
+    "test:coverage": "npm run test:coverage --workspace backend",
+    "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend",
+    "lint": "npm run lint --workspace backend && npm run lint --workspace frontend",
+    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,css}\"",
+    "seed": "npm run seed --workspace backend",
+    "db:print-schema": "npm run db:print-schema --workspace backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prettier": "^3.4.2"
+  }
+}

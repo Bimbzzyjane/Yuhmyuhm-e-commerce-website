@@ -1,0 +1,24 @@
+# Normalise line endings: always LF inside the repository, whatever the
+# developer's platform. Prettier is configured with `endOfLine: lf` and CI
+# checks formatting, so this keeps a Windows checkout from producing a diff
+# that is entirely line endings.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.avif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+
+# The SQL schema is pasted into the Supabase editor; force LF so the diff is
+# meaningful and the file is identical on every platform.
+*.sql text eol=lf
+
+# Lockfiles are generated; collapse them in review and diffs.
+package-lock.json -diff linguist-generated
