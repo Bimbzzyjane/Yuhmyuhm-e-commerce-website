@@ -97,6 +97,11 @@ Express Commerce API  ──►  Supabase Postgres (service-role key, server-onl
 3. **Secrets stay server-side.** `SUPABASE_SERVICE_ROLE_KEY` and
    `MAILGUN_API_KEY` live only in `backend/.env`. The frontend only ever holds
    the Supabase **anon** key, which is public by design and guarded by RLS.
+   **The variable names are legacy; the values are not.** This project uses
+   Supabase's current API keys — `sb_secret_…` in the backend and
+   `sb_publishable_…` in the frontend — pasted into `SUPABASE_SERVICE_ROLE_KEY`
+   and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Do not "correct" the values back to the
+   old `eyJ…` JWTs, and do not assume the variable name describes the key.
 4. **Row Level Security is deny-by-default** on every table. The API connects
    with the service role, which bypasses RLS.
 5. **Guest carts survive sign-in.** A guest cart is merged into the user's cart
@@ -302,8 +307,18 @@ injected interface so tests can substitute a stub without network access.
 | `npm run lint` | ESLint for both workspaces |
 | `npm run format` | Prettier write |
 | `npm run build` | compile backend + production build of Next.js |
-| `npm run seed` | seed Supabase from `seed-data.ts` (needs service-role creds) |
+| `npm run seed` | upsert Supabase from `seed-data.ts` (idempotent by slug; needs the secret key) |
 | `npm run db:print-schema` | print `schema.sql` for Supabase's SQL editor |
+
+### Applying the schema
+
+`schema.sql` can only be applied through the **Supabase dashboard SQL Editor**
+(or `psql` with a direct connection string). The service key is a PostgREST
+credential and **cannot run DDL** — there is no `exec_sql` RPC in a stock
+project, so a missing table is not something the API can fix itself. The
+project's schema is applied and seeded; re-run `npm run db:print-schema` and
+paste it if you ever point at a fresh Supabase project. It is idempotent, so
+running it twice is safe.
 
 ---
 
@@ -330,6 +345,11 @@ injected interface so tests can substitute a stub without network access.
 | Build | `npm run build` | backend `dist/` + 15 Next.js routes |
 | Compiled API | `node backend/dist/server.js` | boots, `/api/health` 200 |
 | Catalogue imagery | live HTTP check | 28/28 image URLs return 200 |
+| Supabase schema | PostgREST probe | 7/7 tables present |
+| RLS deny-by-default | publishable-key probe | reads return `[]`, INSERT → `42501` |
+| Seed | `npm run seed` | 4 categories, 22 products; re-run is idempotent |
+| Catalogue via Supabase | `GET /api/products` | HTTP 200, total 22, filters/search OK |
+| Cart CRUD via Supabase | `POST/PATCH/DELETE /api/cart*` | 201/200, FK join back to products OK |
 | Live walkthrough | see below | guest cart → order → email |
 
 The live walkthrough (against `BACKEND_DATA_BACKEND=memory`,
@@ -432,6 +452,20 @@ Legend: `[x]` done · `[~]` partial · `[ ]` not started
 - **Never ship an image whose licence you could not verify.** If a candidate
   cannot be credited, omit it and let `ProductImage` fall back to the branded
   placeholder. `stainless-piping-tip-set-24` is the precedent.
+- **`tsx watch` does not restart on a `.env` change.** Editing
+  `BACKEND_DATA_BACKEND` in `backend/.env` leaves the running dev API on the
+  previous backend, and `/api/health` will happily report the stale
+  `dataBackend`. A green storefront is not proof of which database it is
+  talking to — check `dataBackend` in the health response, and restart
+  `npm run dev` after switching.
+- **`NEXT_PUBLIC_*` values are baked in at build time.** Changing one in
+  `frontend/.env.local` needs a restart, and a stale
+  `frontend/.next/cache` will keep serving old data. That is also why catalogue
+  imagery appeared to "not update" once — clear `.next/cache` before believing
+  a change did not land.
+- **`productId` on cart routes is a UUID, not a slug.** `GET /api/products`
+  accepts `idOrSlug`, but `POST /api/cart/items` validates `productId` as a
+  UUID and returns `400 VALIDATION_ERROR` for a slug.
 - **No cart expiry.** `carts.status` supports `abandoned`, but nothing sweeps
   stale guest carts yet. A scheduled job should retire carts untouched for
   ~30 days.
