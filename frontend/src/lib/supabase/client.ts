@@ -28,8 +28,13 @@ export function getSupabaseBrowserClient(): SupabaseClient | null {
   return browserClient;
 }
 
-/** Where Supabase should send the browser back to after Google sign-in. */
+/**
+ * Where Supabase should send the browser back to after Google sign-in.
+ *
+ * `||` not `??`: an empty `NEXT_PUBLIC_SITE_URL=` is an empty string, which is
+ * falsy, so the local default still applies.
+ */
 export function authRedirectTo(next = '/'): string {
-  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
-  return `${siteUrl}/auth/callback?next=${encodeURIComponent(next)}`;
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || '').trim() || 'http://localhost:3000';
+  return `${siteUrl.replace(/\/+$/, '')}/auth/callback?next=${encodeURIComponent(next)}`;
 }

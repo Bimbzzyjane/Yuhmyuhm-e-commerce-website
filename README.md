@@ -107,7 +107,7 @@ Add your API key and sending domain to `backend/.env` and switch transport:
 MAIL_TRANSPORT=mailgun
 MAILGUN_API_KEY=key-...
 MAILGUN_DOMAIN=mg.yourdomain.com
-EMAIL_FROM_ADDRESS=orders@yourdomain.com
+MAILGUN_FROM_EMAIL=orders@yourdomain.com
 ```
 
 Domains on the EU region also need
@@ -161,7 +161,7 @@ Full request/response contracts, cart-resolution rules and error codes are in
 ## Deployment
 
 **Frontend → Vercel.** Import the repo, set the root directory to `frontend`,
-and add `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`,
+and add `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`,
 `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SITE_URL`.
 
 **Backend → Railway / Render / Fly.io.** Root directory `backend`, build

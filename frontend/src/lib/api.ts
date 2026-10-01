@@ -20,9 +20,27 @@ import type {
  *     cart contains.
  */
 
-export const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000'
-).replace(/\/+$/, '');
+/**
+ * API origin used by the browser bundle.
+ *
+ * Three details matter here:
+ *  1. `NEXT_PUBLIC_API_URL` is the documented name. `NEXT_PUBLIC_API_BASE_URL`
+ *     is still honoured so an existing deployment keeps working after the
+ *     rename.
+ *  2. Each value is read as a full literal `process.env.X` expression, because
+ *     Next.js inlines those statically at build time — a computed lookup such as
+ *     `process.env[name]` would NOT be substituted in the bundle.
+ *  3. `||` rather than `??` deliberately: a line of `KEY=` in .env.local yields
+ *     an EMPTY STRING, which is falsy but not nullish, so `??` would happily
+ *     hand back "" and every request URL would become relative.
+ */
+const configuredApiUrl =
+  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || '';
+
+export const API_BASE_URL = (configuredApiUrl.trim() || 'http://localhost:4000').replace(
+  /\/+$/,
+  '',
+);
 
 const GUEST_CART_KEY = 'yuhmyuhm.guestCartId';
 

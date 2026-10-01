@@ -28,7 +28,11 @@ const body = Inter({
   variable: '--font-body',
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
+/**
+ * `||` not `??` on purpose: a blank `NEXT_PUBLIC_SITE_URL=` in .env.local is an
+ * empty string (falsy), and `new URL('')` would throw during the build.
+ */
+const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || '').trim() || 'http://localhost:3000';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

@@ -14,7 +14,7 @@ Last updated: 2026-10-01 · Maintained by: Cline (initial scaffold)
 premium cakes and professional catering equipment, with a full cart → checkout
 → order-confirmation flow and transactional email.
 
-- **Storefront**: `frontend/` — Next.js (App Router) + TypeScript + CSS Modules.
+- **Storefront**: `frontend/` — Next.js (App Router) + TypeScript, styled by a single token-driven stylesheet.
 - **Commerce API**: `backend/` — Express + TypeScript, the *only* layer allowed
   to touch the database or compute prices.
 - **Database**: Supabase (hosted PostgreSQL).
@@ -351,7 +351,7 @@ Legend: `[x]` done · `[~]` partial · `[ ]` not started
 - [x] Responsive pass
 - [x] Full verification: typecheck, lint, format, 61 API tests, production
       build, compiled-server boot, live guest-order walkthrough
-- [ ] Deploy: backend host + Vercel; set `NEXT_PUBLIC_API_BASE_URL` to the
+- [ ] Deploy: backend host + Vercel; set `NEXT_PUBLIC_API_URL` to the
       live API origin and add it to `CORS_ORIGINS`
 - [ ] Point `design/` at real Yuhmyuhm photography and replace the seeded
       `picsum.photos` URLs
@@ -406,4 +406,34 @@ Legend: `[x]` done · `[~]` partial · `[ ]` not started
   migration, an email template) add it to the `ASSETS` list there.
 - A production deploy must run `npm run build` in `backend/` **before**
   `npm start`; `start` executes `dist/server.js`, not the TypeScript sources.
+- **Red squiggles on `tsconfig.json`, `app/layout.tsx` and `app/not-found.tsx`
+  are a known trap, and the cause is not what it looks like.** `npm run
+  typecheck` reports 0 errors while the editor reports:
+  ```
+  src/app/layout.tsx(6,8):    error TS2307: Cannot find module './globals.css'
+  src/app/not-found.tsx(2,8): error TS2307: Cannot find module './globals.css'
+  ```
+  Those are the only two files that import CSS. `import './x.css'` is a
+  side-effect-only import, TypeScript resolves it solely through an ambient
+  module declaration, and **Next 15 no longer ships one**
+  (`next/types/global.d.ts` is gone). TS 5.9 tolerates the gap because
+  `noUncheckedSideEffectImports` defaults to `false`; TS 6/7 turn it on. Three
+  things now prevent it:
+  1. `frontend/src/types/assets.d.ts` declares `*.css` and the image formats;
+  2. `frontend/tsconfig.json` sets `noUncheckedSideEffectImports: true` so a
+     genuinely mistyped import is caught today, not on a TS upgrade;
+  3. `.vscode/settings.json` pins `typescript.tsdk` to the workspace TypeScript,
+     so the editor uses the version this repo is verified against instead of
+     VS Code's bundled one.
+  Reproduce the editor's strictness at any time with:
+  `cd frontend && npx tsc --noEmit --noUncheckedSideEffectImports`
+- **Env var naming.** The documented names are `MAILGUN_FROM_EMAIL`,
+  `MAILGUN_FROM_NAME` and `NEXT_PUBLIC_API_URL`. `EMAIL_FROM_ADDRESS`,
+  `EMAIL_FROM_NAME` and `NEXT_PUBLIC_API_BASE_URL` are still *read* as legacy
+  aliases so an existing `.env` keeps working — do not use them in new files, and
+  do not remove the aliases without a note here.
+- **`KEY=` in a .env file yields an EMPTY STRING, not `undefined`.** That is
+  falsy but not nullish, so `process.env.X ?? fallback` hands back `""`. Every
+  env read in this repo uses `||` for that reason — keep it that way, which is
+  what allows every value to sit blank in `.env.example`.
 

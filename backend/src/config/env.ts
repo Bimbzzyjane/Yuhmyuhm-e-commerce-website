@@ -26,8 +26,21 @@ const EnvSchema = z
     MAILGUN_API_KEY: z.string().min(1).optional(),
     MAILGUN_DOMAIN: z.string().min(1).optional(),
     MAILGUN_API_BASE: z.string().url().default('https://api.mailgun.net'),
-    EMAIL_FROM_NAME: z.string().min(1).default('Yuhmyuhm Catering Services'),
-    EMAIL_FROM_ADDRESS: z.email().default('orders@yuhmyuhm.com'),
+
+    /**
+     * Sender identity.
+     *
+     * `MAILGUN_FROM_*` are the documented names. The `EMAIL_FROM_*` pair is
+     * still accepted so an existing `.env` keeps working after the rename.
+     * Blank values never reach this schema: `loadConfig` drops empty strings
+     * before validating, which is what lets every key sit blank in
+     * `.env.example` and still boot.
+     */
+    MAILGUN_FROM_EMAIL: z.email().optional(),
+    MAILGUN_FROM_NAME: z.string().min(1).optional(),
+    EMAIL_FROM_ADDRESS: z.email().optional(),
+    EMAIL_FROM_NAME: z.string().min(1).optional(),
+
     EMAIL_ORDER_NOTIFICATION_TO: z.email().optional(),
 
     /** Major currency units, converted to minor units below. */
@@ -159,8 +172,10 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       apiKey: env.MAILGUN_API_KEY ?? null,
       domain: env.MAILGUN_DOMAIN ?? null,
       apiBase: env.MAILGUN_API_BASE.replace(/\/+$/, ''),
-      fromName: env.EMAIL_FROM_NAME,
-      fromAddress: env.EMAIL_FROM_ADDRESS,
+      // Blank in .env falls through to the brand default rather than sending
+      // mail with an empty From header.
+      fromName: env.MAILGUN_FROM_NAME ?? env.EMAIL_FROM_NAME ?? 'Yuhmyuhm Catering Services',
+      fromAddress: env.MAILGUN_FROM_EMAIL ?? env.EMAIL_FROM_ADDRESS ?? 'orders@yuhmyuhm.com',
       orderNotificationTo: env.EMAIL_ORDER_NOTIFICATION_TO ?? null,
     },
     currency: env.CURRENCY.toUpperCase(),

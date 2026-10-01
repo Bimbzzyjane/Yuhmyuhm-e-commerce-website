@@ -1,0 +1,42 @@
+{
+  // ---------------------------------------------------------------------------
+  // TypeScript: use the version this repo is built and tested against.
+  //
+  // Without this, VS Code falls back to its own bundled TypeScript, which can
+  // be a major version ahead and report different diagnostics than
+  // `npm run typecheck` (the repo is verified with the pinned 5.9.3).
+  // `npm install` hoists typescript to the workspace root, hence the path.
+  // ---------------------------------------------------------------------------
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // The two workspaces each ship their own flat ESLint config.
+  "eslint.workingDirectories": ["backend", "frontend"],
+
+  // ---------------------------------------------------------------------------
+  // Formatting: Prettier on save, matching `npm run format`.
+  // ---------------------------------------------------------------------------
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+
+  // ---------------------------------------------------------------------------
+  // Files: LF endings to match .gitattributes and Prettier's endOfLine setting,
+  // so saving in a Windows editor never produces a whitespace-only diff.
+  // ---------------------------------------------------------------------------
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "files.trimFinalNewlines": true,
+  "[markdown]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[css]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  }
+}

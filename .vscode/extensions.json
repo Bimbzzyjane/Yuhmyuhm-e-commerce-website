@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    // Formatting, to match `npm run format` (Prettier).
+    "esbenp.prettier-vscode",
+
+    // Linting, to match `npm run lint` (flat config + typescript-eslint).
+    "dbaeumer.vscode-eslint",
+
+    // Syntax highlighting for schema.sql, which operators paste into Supabase.
+    "mtxr.sqltools"
+  ]
+}

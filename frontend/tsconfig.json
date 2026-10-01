@@ -15,7 +15,17 @@
     "incremental": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+
+    // Opt in explicitly. TypeScript 6/7 turns this on by default, and without it
+    // a mistyped CSS/asset import (e.g. './global.css') passes silently. The
+    // side-effect imports we rely on are declared in src/types/assets.d.ts.
+    "noUncheckedSideEffectImports": true,
+
     "plugins": [{ "name": "next" }],
+
+    // Declared alongside `paths` so the `@/*` alias is explicit. Some tool
+    // schemas still expect `baseUrl` to be present when `paths` is used.
+    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }
