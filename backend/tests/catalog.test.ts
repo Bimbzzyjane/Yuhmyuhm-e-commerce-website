@@ -1,5 +1,54 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { SEED_CATEGORIES, SEED_PRODUCTS } from '../src/db/seed-data';
 import { createTestContext, type TestContext } from './helpers/test-app';
+
+/**
+ * Seeded imagery is served to the browser as-is, so a path that does not exist
+ * becomes a 404 on a live page instead of an obvious failure. These tests read
+ * the real published files so the mismatch is caught at CI time.
+ */
+const CATALOG_DIR = join(__dirname, '..', '..', 'frontend', 'public', 'images', 'catalog');
+
+/** `imageUrl` is optional on the seed row types; normalise to string | null. */
+const seededImageUrls = [
+  ...SEED_CATEGORIES.map((c) => ({ label: `category ${c.slug}`, url: c.imageUrl ?? null })),
+  ...SEED_PRODUCTS.map((p) => ({ label: `product ${p.slug}`, url: p.imageUrl ?? null })),
+];
+
+describe('seeded catalogue imagery', () => {
+  it('gives every category and product an image or an explicit null', () => {
+    expect(seededImageUrls).toHaveLength(SEED_CATEGORIES.length + SEED_PRODUCTS.length);
+  });
+
+  it('points only at local paths, never a third-party host', () => {
+    for (const { label, url } of seededImageUrls) {
+      if (url === null) continue;
+      expect(url, label).toMatch(/^\/images\/catalog\/[\w-]+\.jpg$/);
+    }
+  });
+
+  it('references only files that are actually published', () => {
+    const missing: string[] = [];
+    for (const { label, url } of seededImageUrls) {
+      if (url === null) continue;
+      const filename = url.replace('/images/catalog/', '');
+      if (!existsSync(join(CATALOG_DIR, filename))) {
+        missing.push(`${label} -> ${url}`);
+      }
+    }
+    // A null imageUrl is a deliberate placeholder choice, not a failure.
+    expect(missing, `missing published images:\n${missing.join('\n')}`).toEqual([]);
+  });
+
+  it('leaves only the unlicensed piping-tip set without a photo', () => {
+    const withoutPhoto = SEED_PRODUCTS.filter((p) => p.imageUrl === null).map((p) => p.slug);
+    // If a verifiable photo is ever sourced, add it to --apply in
+    // scripts/fetch-catalog-images.mjs and delete this expectation.
+    expect(withoutPhoto).toEqual(['stainless-piping-tip-set-24']);
+  });
+});
 
 describe('health', () => {
   let ctx: TestContext;

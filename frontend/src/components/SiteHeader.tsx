@@ -20,8 +20,6 @@ const NAV_LINKS = [
   { href: '/', label: 'Home', exact: true },
   { href: '/category/cakes', label: 'Cakes' },
   { href: '/category/catering-equipment', label: 'Equipment' },
-  { href: '/category/baking-supplies', label: 'Baking' },
-  { href: '/category/event-essentials', label: 'Events' },
   { href: '/orders', label: 'Orders' },
 ] as const;
 

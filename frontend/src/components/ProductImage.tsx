@@ -6,10 +6,11 @@ import { useState } from 'react';
 /**
  * Product imagery with a guaranteed graceful failure.
  *
- * Catalogue images are remote stock photography in this build, so any one of
- * them can 404 or be blocked by a network policy. Rather than showing the
- * browser's broken-image glyph, we swap in the branded local placeholder — the
- * layout never shifts and the storefront never looks broken.
+ * Catalogue images are bundled locally under `public/images/catalog/`, but a
+ * product can still have no `src` at all (e.g. `stainless-piping-tip-set-24`,
+ * whose only candidate photo had an unverifiable licence). Rather than showing
+ * the browser's broken-image glyph, we swap in the branded local placeholder —
+ * the layout never shifts and the storefront never looks broken.
  *
  * Renders with `fill`, so the parent element must be positioned (all callers
  * use a `.product-card__media` / `.cart-line__media` wrapper, which are).

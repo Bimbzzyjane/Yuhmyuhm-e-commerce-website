@@ -66,3 +66,7 @@ desktop.ini
 tmp/
 temp/
 *.local
+
+# Working directory for scripts/fetch-catalog-images.mjs --candidates.
+.image-review/
+.image-review-approved/

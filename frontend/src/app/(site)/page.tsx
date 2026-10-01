@@ -65,8 +65,8 @@ export default async function HomePage() {
 
             <div className="hero__media">
               <ProductImage
-                src="https://picsum.photos/seed/yuhmyuhm-hero/1200/900"
-                alt="A freshly finished celebration cake on a catering table"
+                src="/images/catalog/hero-cake.jpg"
+                alt="A four-tier white celebration cake finished with orchids"
                 className="hero__image"
                 sizes="(max-width: 900px) 100vw, 50vw"
                 priority
@@ -164,7 +164,7 @@ export default async function HomePage() {
       {/* ------------------------------------------------------------ CTA band */}
       <section className="cta">
         <ProductImage
-          src="https://picsum.photos/seed/yuhmyuhm-cta/1600/600"
+          src="/images/catalog/cta-cake.jpg"
           alt=""
           className="cta__image"
           sizes="100vw"

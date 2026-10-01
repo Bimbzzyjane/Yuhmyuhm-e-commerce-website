@@ -28,16 +28,10 @@ const nextConfig = {
   },
 
   images: {
-    // Remote photography for the demo catalogue. Replace with the brand's own
-    // assets before launch; `ProductImage` degrades to a local SVG if a remote
-    // image ever fails.
-    remotePatterns: [
-      { protocol: 'https', hostname: 'picsum.photos' },
-      // picsum redirects to this CDN host for the actual bytes.
-      { protocol: 'https', hostname: 'fastly.picsum.photos' },
-      // Google account avatars shown next to a signed-in shopper.
-      { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
-    ],
+    // Catalogue photography is bundled in `public/images/catalog/`, so it needs
+    // no remote pattern. Only Google account avatars, shown next to a signed-in
+    // shopper, are still fetched from a third-party host.
+    remotePatterns: [{ protocol: 'https', hostname: 'lh3.googleusercontent.com' }],
   },
 };
 

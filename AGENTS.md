@@ -326,9 +326,10 @@ injected interface so tests can substitute a stub without network access.
 | Frontend types | `npm run typecheck` | 0 errors |
 | Lint (both) | `npm run lint` | 0 errors, 0 warnings |
 | Formatting | `npm run format:check` | all files clean |
-| API tests | `npm test` | **61 passed / 61** |
+| API tests | `npm test` | **66 passed / 66** |
 | Build | `npm run build` | backend `dist/` + 15 Next.js routes |
 | Compiled API | `node backend/dist/server.js` | boots, `/api/health` 200 |
+| Catalogue imagery | live HTTP check | 28/28 image URLs return 200 |
 | Live walkthrough | see below | guest cart → order → email |
 
 The live walkthrough (against `BACKEND_DATA_BACKEND=memory`,
@@ -389,20 +390,48 @@ Legend: `[x]` done · `[~]` partial · `[ ]` not started
       build, compiled-server boot, live guest-order walkthrough
 - [ ] Deploy: backend host + Vercel; set `NEXT_PUBLIC_API_URL` to the
       live API origin and add it to `CORS_ORIGINS`
-- [ ] Point `design/` at real Yuhmyuhm photography and replace the seeded
-      `picsum.photos` URLs
+- [ ] Point `design/` at real Yuhmyuhm photography
 
 ### Known gaps / follow-ups
 
-- **Images**: seeded `image_url` values point at remote stock photography so
-  the storefront looks like the mockups. `components/ProductImage.tsx` falls
-  back to a branded local SVG if an image fails to load. Replace seeded URLs
-  with real Yuhmyuhm photography before launch.
+- **Images**: `backend/src/db/seed-data.ts` resolves every `imageUrl` through
+  `img(slug)`, which returns `/images/catalog/<slug>.jpg`. Those files are
+  bundled in `frontend/public/images/catalog/` (28 files, ~2.9 MB), so the
+  storefront renders the catalogue with **no third-party image host** and the
+  `picsum.photos` `remotePatterns` entries in `next.config.mjs` are gone.
+  They were sourced by `scripts/fetch-catalog-images.mjs` and are credited in
+  `ATTRIBUTIONS.md` — several are CC BY / CC BY-SA and require attribution, so
+  that file must ship with the project. Replace with real Yuhmyuhm photography
+  before launch. `stainless-piping-tip-set-24` intentionally has no photo (the
+  only candidate's licence could not be verified) and renders the branded
+  placeholder.
 - **Payments** are intentionally out of scope (see §1).
 - **Stock decrement is best-effort.** It happens after the order is durably
   stored and is wrapped in a try/catch, so a stock failure is logged rather than
   failing a checkout that already succeeded. The consequence is that stock can
   drift if that write fails; a nightly reconciliation job is the fix.
+- **Nav links live in one array.** `components/SiteHeader.tsx` holds
+  `NAV_LINKS`. Baking and Event Essentials were removed from it on request;
+  both categories are still fully browsable via the homepage category grid and
+  `/category/<slug>`. Adding a nav entry means adding to that array, nothing
+  else.
+- **Catalogue imagery must match the product.** Do not reintroduce a generic
+  stock-photo service. `scripts/fetch-catalog-images.mjs` has two providers
+  because neither alone is good enough: **Openverse** finds cakes and general
+  photography, **Wikimedia Commons** finds the commercial equipment (searching
+  "stand mixer" on Openverse returns antique glass bowls; Commons has a real
+  KitchenAid). Even then, **the top search hit is frequently the wrong
+  object** — a Lego cupcake for a marble cake, a cement mixer for a mixer, a
+  sightseeing bus for a serving trolley, Table Mountain for a tablecloth. So
+  the workflow is: `--candidates` to download a pool into `.image-review/`,
+  *look at every candidate*, record the winner in `APPROVED`, then `--apply` to
+  publish it. The choice is recorded in code precisely so the next agent can see
+  it was deliberate. Commons also returns 429 under bursts; the script spaces
+  requests and retries with backoff, so a partial failure is expected and
+  rerunnable.
+- **Never ship an image whose licence you could not verify.** If a candidate
+  cannot be credited, omit it and let `ProductImage` fall back to the branded
+  placeholder. `stainless-piping-tip-set-24` is the precedent.
 - **No cart expiry.** `carts.status` supports `abandoned`, but nothing sweeps
   stale guest carts yet. A scheduled job should retire carts untouched for
   ~30 days.

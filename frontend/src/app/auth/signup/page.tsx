@@ -40,7 +40,7 @@ export default async function SignUpPage({
     <div className="auth">
       <aside className="auth__art">
         <ProductImage
-          src="https://picsum.photos/seed/yuhmyuhm-signup/1200/1500"
+          src="/images/catalog/auth-cake.jpg"
           alt=""
           className="auth__art-image"
           sizes="(max-width: 880px) 100vw, 50vw"

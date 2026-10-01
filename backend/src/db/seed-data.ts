@@ -10,44 +10,53 @@ import type { NewCategoryRow, NewProductRow } from '../repositories/types';
  *
  * PRICES ARE IN MINOR UNITS (kobo). `naira(45000)` === ₦45,000.
  *
- * IMAGERY: URLs point at `picsum.photos`, which serves a real photograph for
- * any seed string — deterministic, never a broken link, and no API key. Swap
- * these for commissioned Yuhmyuhm photography before launch;
- * `components/ProductImage.tsx` falls back to a branded local placeholder if
- * an image ever fails to load.
+ * IMAGERY: every `imageUrl` is either null or points at a photograph that ships
+ * with the storefront in `frontend/public/images/catalog/`, so the catalogue
+ * renders offline and never depends on a third-party image host. The files are
+ * subject-matched (a chafing dish shows a chafing dish, a cake shows a cake),
+ * were chosen by reviewing candidates rather than trusting search rank, and
+ * are credited in ATTRIBUTIONS.md. Swap them for commissioned Yuhmyuhm
+ * photography before launch; a null `imageUrl` (or an image that fails to
+ * load) falls back to a branded local placeholder via
+ * `components/ProductImage.tsx`. `catalog.test.ts` asserts every non-null
+ * path actually exists.
  */
 
 const naira = (major: number): number => Math.round(major * 100);
 
-const img = (seed: string): string => `https://picsum.photos/seed/${seed}/900/900`;
+/**
+ * Resolves a catalogue slug to its bundled photograph. The argument is the
+ * slug used by `scripts/fetch-catalog-images.mjs`, so the two stay in step.
+ */
+const img = (slug: string): string => `/images/catalog/${slug}.jpg`;
 
 export const SEED_CATEGORIES: NewCategoryRow[] = [
   {
     slug: 'cakes',
     name: 'Cakes',
     description: 'Celebration cakes, hand-finished in our kitchen and baked to order.',
-    imageUrl: img('yuhmyuhm-category-cakes'),
+    imageUrl: img('category-cakes'),
     sortOrder: 1,
   },
   {
     slug: 'catering-equipment',
     name: 'Catering Equipment',
     description: 'Professional-grade equipment for kitchens that scale with demand.',
-    imageUrl: img('yuhmyuhm-category-equipment'),
+    imageUrl: img('category-catering-equipment'),
     sortOrder: 2,
   },
   {
     slug: 'baking-supplies',
     name: 'Baking Supplies',
     description: 'Everyday tools and finishing touches our own bakers reach for.',
-    imageUrl: img('yuhmyuhm-category-baking'),
+    imageUrl: img('category-baking-supplies'),
     sortOrder: 3,
   },
   {
     slug: 'event-essentials',
     name: 'Event Essentials',
     description: 'Elegant furniture, barware and linen to dress the room.',
-    imageUrl: img('yuhmyuhm-category-events'),
+    imageUrl: img('category-event-essentials'),
     sortOrder: 4,
   },
 ];
@@ -206,7 +215,12 @@ export const SEED_PRODUCTS: NewProductRow[] = [
     description: 'Seamless stainless nozzles with couplers and a storage case.',
     categorySlug: 'baking-supplies',
     price: naira(18500),
-    imageUrl: img('stainless-piping-tip-set'),
+    // Deliberately null: the only photograph found for this product had a
+    // licence we could not verify, so it is not published (see
+    // scripts/fetch-catalog-images.mjs). ProductImage falls back to the
+    // branded placeholder. Do not point this at a filename that is not
+    // published — that turns a designed placeholder into a 404.
+    imageUrl: null,
     badge: 'Best Seller',
     stockQuantity: 60,
     sortOrder: 2,
@@ -261,7 +275,7 @@ export const SEED_PRODUCTS: NewProductRow[] = [
     description: 'A 152 cm folding round table with a height-adjustable pedestal.',
     categorySlug: 'event-essentials',
     price: naira(130000),
-    imageUrl: img('round-banquet-table'),
+    imageUrl: img('round-banquet-table-6-seater'),
     stockQuantity: 30,
     sortOrder: 2,
   },
