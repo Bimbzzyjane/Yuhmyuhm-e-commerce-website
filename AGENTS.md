@@ -466,6 +466,20 @@ Legend: `[x]` done · `[~]` partial · `[ ]` not started
 - **`productId` on cart routes is a UUID, not a slug.** `GET /api/products`
   accepts `idOrSlug`, but `POST /api/cart/items` validates `productId` as a
   UUID and returns `400 VALIDATION_ERROR` for a slug.
+- **Product ids are NOT stable across data backends — purge the cache when you
+  switch.** The `memory` repository mints a **fresh `randomUUID()` for every
+  product on every boot** (`createDatabase()` starts from empty Maps, so
+  `upsertMany` always takes the `existing?.id ?? newId()` branch). Supabase ids
+  are permanent. So a catalogue response cached while the API ran on `memory`
+  hands the browser ids that **do not exist in Postgres**, and Add to Cart
+  fails with `404 NOT_FOUND: We could not find that product.` — even though the
+  page renders perfectly, because only the invisible `id` is wrong. It is a 404
+  rather than a 400 because the stale value is still a syntactically valid UUID
+  and therefore passes `z.uuid()`. Switching `BACKEND_DATA_BACKEND`, or
+  re-seeding into a database that assigned new ids, invalidates every cached
+  catalogue response. Fix: `rm -rf frontend/.next/cache/fetch-cache` and restart
+  the storefront. The failure looks like an id/slug contract bug but is not —
+  `ProductCard` and `ProductPurchasePanel` both correctly pass `product.id`.
 - **No cart expiry.** `carts.status` supports `abandoned`, but nothing sweeps
   stale guest carts yet. A scheduled job should retire carts untouched for
   ~30 days.
