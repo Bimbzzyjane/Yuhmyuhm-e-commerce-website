@@ -216,6 +216,13 @@ export interface CategoryRepository {
 
 export interface UserRepository {
   findByAuthUserId(authUserId: string): Promise<UserRow | null>;
+  /**
+   * Case-insensitive lookup by email. Used to re-link a profile when the same
+   * person returns through a *different* sign-in method — for example signing
+   * up with an email and password and later continuing with Google, which
+   * gives them a different `auth.users` id but the same email address.
+   */
+  findByEmail(email: string): Promise<UserRow | null>;
   /** Creates the profile on first sign-in, refreshes name/avatar afterwards. */
   upsertFromIdentity(identity: AuthenticatedIdentity): Promise<UserRow>;
 }

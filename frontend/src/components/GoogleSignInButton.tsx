@@ -48,7 +48,7 @@ export function GoogleSignInButton({
   next,
   label = 'Continue with Google',
 }: GoogleSignInButtonProps) {
-  const { signInWithGoogle, configured } = useAuth();
+  const { signInWithGoogle } = useAuth();
   const pathname = usePathname();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -59,6 +59,8 @@ export function GoogleSignInButton({
 
     const result = await signInWithGoogle(next ?? pathname ?? '/');
     if (!result.ok) {
+      // Reported only on use, so the button never sits there carrying a
+      // permanent disclaimer.
       setMessage(result.message ?? 'We could not start the sign-in. Please try again.');
       setBusy(false);
     }
@@ -71,18 +73,12 @@ export function GoogleSignInButton({
         type="button"
         className="google-btn"
         onClick={() => void handleClick()}
-        disabled={!configured || busy}
+        disabled={busy}
+        aria-busy={busy}
       >
         <GoogleGlyph />
         {busy ? 'Redirecting to Google…' : label}
       </button>
-
-      {!configured ? (
-        <p className="field__hint" style={{ marginTop: 'var(--space-2)' }}>
-          Sign-in is not configured on this deployment. Guest checkout still works — your cart is
-          saved either way.
-        </p>
-      ) : null}
 
       {message ? (
         <p className="field__error" role="alert" style={{ marginTop: 'var(--space-2)' }}>

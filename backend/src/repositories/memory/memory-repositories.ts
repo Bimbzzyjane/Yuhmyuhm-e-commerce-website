@@ -287,8 +287,21 @@ class MemoryUserRepository implements UserRepository {
     return null;
   }
 
+  async findByEmail(email: string): Promise<UserRow | null> {
+    const needle = email.toLowerCase();
+    for (const user of this.db.users.values()) {
+      if (user.email.toLowerCase() === needle) return user;
+    }
+    return null;
+  }
+
   async upsertFromIdentity(identity: AuthenticatedIdentity): Promise<UserRow> {
-    const existing = await this.findByAuthUserId(identity.authUserId);
+    // Match on auth id first, then on email: the same human may have created
+    // their profile with an email/password sign-up and then come back through
+    // Google, which Supabase represents as a different auth id.
+    const existing =
+      (await this.findByAuthUserId(identity.authUserId)) ??
+      (await this.findByEmail(identity.email));
     const timestamp = nowIso();
     const id = existing?.id ?? newId();
     const row: UserRow = {

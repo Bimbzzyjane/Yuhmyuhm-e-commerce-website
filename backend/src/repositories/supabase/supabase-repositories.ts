@@ -516,13 +516,28 @@ class SupabaseUserRepository implements UserRepository {
     return row ? mapUser(row) : null;
   }
 
+  async findByEmail(email: string): Promise<UserRow | null> {
+    // `ilike` makes the match case-insensitive. `.limit(1)` rather than
+    // `maybeSingle()` because Postgres `unique` on email is case-sensitive, so
+    // in principle two rows could differ only by case; `maybeSingle` would then
+    // throw instead of returning one.
+    const rows = ok<UserDbRow[]>(
+      await this.db.from('users').select('*').ilike('email', email).limit(1),
+      'find user by email',
+    );
+    return rows[0] ? mapUser(rows[0]) : null;
+  }
+
   async upsertFromIdentity(identity: AuthenticatedIdentity): Promise<UserRow> {
-    const existing = await this.findByAuthUserId(identity.authUserId);
+    // Match on auth id, then on email: the same person may have signed up with
+    // an email and password and later returned through Google, which Supabase
+    // represents as a different auth id but the same address.
+    const existing =
+      (await this.findByAuthUserId(identity.authUserId)) ??
+      (await this.findByEmail(identity.email));
     const timestamp = new Date().toISOString();
 
-    // Deliberately a read-then-write rather than an upsert: Google does not
-    // always return a name/avatar, and an upsert would blank out values we
-    // already have.
+    // Never overwrite a known name/avatar with a null from a later sign-in.
     const payload = {
       auth_user_id: identity.authUserId,
       email: identity.email,
@@ -541,7 +556,7 @@ class SupabaseUserRepository implements UserRepository {
 
     const insert = await this.db.from('users').insert(payload).select().single();
     if (isUniqueViolation(insert.error)) {
-      // Two first-time requests raced; the other one won, so read it back.
+      // Lost a race against a concurrent first sign-in.
       const row = await this.findByAuthUserId(identity.authUserId);
       if (row) return row;
     }

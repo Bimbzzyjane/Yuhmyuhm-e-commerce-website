@@ -158,6 +158,43 @@ Full request/response contracts, cart-resolution rules and error codes are in
 
 ---
 
+## Accounts & sign-in
+
+Two ways in — **both produce the same session**, so the API, the cart and the
+header behave identically afterwards:
+
+- **Email + password** — works as soon as `NEXT_PUBLIC_SUPABASE_URL` and
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set. Email authentication is enabled by
+  default in every Supabase project, so there is nothing to switch on.
+- **Google** — additionally needs the Google provider enabled in Supabase
+  (setup step 3 below).
+
+Signing in merges any guest cart into the account, so a shopper loses nothing by
+creating an account after browsing. And if the same person later continues with
+Google using the same address, the API re-links their existing profile instead
+of creating a second one — their cart and order history follow them.
+
+### Enabling Google sign-in
+
+1. Google Cloud Console → **APIs & Services → Credentials → Create OAuth client
+   ID** → *Web application*.
+2. **Authorised JavaScript origin:** `http://localhost:3000` (plus your Vercel
+   origin in production).
+3. **Authorised redirect URI:** `https://<project-ref>.supabase.co/auth/v1/callback`
+4. Supabase → **Authentication → Providers → Google** → enable, then paste the
+   Client ID and Client Secret.
+5. Supabase → **Authentication → URL Configuration → Redirect URLs** → add
+   `http://localhost:3000/auth/callback`.
+
+> **Why the Google keys are not read from `.env`:** an OAuth client secret has
+> to be held by whichever party exchanges the authorisation code — here that is
+> Supabase. Storing it in the app's environment would either leave the app
+> unable to complete the exchange, or move the secret somewhere that does not own
+> it. `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are therefore kept in the env
+> files as a record of the values, with the dashboard step documented beside them.
+
+---
+
 ## Deployment
 
 **Frontend → Vercel.** Import the repo, set the root directory to `frontend`,

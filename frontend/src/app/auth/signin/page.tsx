@@ -1,17 +1,19 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { AuthForm } from '@/components/AuthForm';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { ChefHatIcon } from '@/components/Icons';
 import { ProductImage } from '@/components/ProductImage';
 
 export const metadata: Metadata = {
   title: 'Sign in',
-  description: 'Sign in with Google to keep your Yuhmyuhm cart and order history.',
+  description:
+    'Sign in to Yuhmyuhm Catering Services with your email and password, or continue with Google.',
   robots: { index: false, follow: true },
 };
 
 const ERROR_MESSAGES: Record<string, string> = {
-  not_configured: 'Google sign-in is not configured on this deployment yet.',
+  not_configured: 'Accounts are not available on this deployment yet.',
   missing_code: 'Google did not return an authorisation code. Please try again.',
   exchange_failed: 'We could not complete the sign-in. Please try again.',
 };
@@ -19,20 +21,30 @@ const ERROR_MESSAGES: Record<string, string> = {
 const TRUST_POINTS = ['Free delivery over ₦150,000', 'Order history', 'Saved delivery details'];
 
 /**
- * Sign-in — the split layout from design/auth.png.
+ * Sign in — the split layout from design/auth.png, with the order the brief
+ * asked for:
  *
- * Lives outside the `(site)` route group so it renders full-bleed without the
- * storefront header and footer.
+ *   1. email + password (the primary route)
+ *   2. an `or` divider
+ *   3. Continue with Google
+ *   4. a link to create an account
+ *
+ * `?next=` is honoured through both routes and validated to be a local path, so
+ * it can never become an open redirect.
  */
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
+
   const message = error
     ? (ERROR_MESSAGES[error] ?? 'Something went wrong during sign-in. Please try again.')
     : null;
+
+  const safeNext =
+    typeof next === 'string' && next.startsWith('/') && !next.startsWith('//') ? next : '/';
 
   return (
     <div className="auth">
@@ -86,22 +98,25 @@ export default async function SignInPage({
 
           <div style={{ marginTop: 'var(--space-6)' }}>
             <p className="eyebrow">Welcome back</p>
-            <h1 className="auth__title">Sign in to Yuhmyuhm</h1>
+            <h1 className="auth__title">Sign in</h1>
             <p className="auth__lead">
-              We only use your Google account to recognise you and keep your cart and order history
-              together. No passwords to remember.
+              Sign in to keep your cart, your order history and your saved delivery details
+              together.
             </p>
           </div>
 
-          <div style={{ marginTop: 'var(--space-6)' }}>
-            <GoogleSignInButton />
+          <div style={{ marginTop: 'var(--space-5)' }}>
+            <AuthForm mode="signin" next={safeNext} />
           </div>
 
           <p className="auth__divider">or</p>
 
-          <Link href="/search" className="btn btn--outline btn--block">
-            Continue as a guest
-          </Link>
+          <GoogleSignInButton next={safeNext} />
+
+          <p className="auth__switch">
+            Don&rsquo;t have an account yet?{' '}
+            <Link href={`/auth/signup?next=${encodeURIComponent(safeNext)}`}>Create one</Link>
+          </p>
 
           <p className="auth__terms">
             By continuing you agree to our <Link href="/terms">Terms of Service</Link> and{' '}

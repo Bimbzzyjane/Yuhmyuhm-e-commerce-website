@@ -58,6 +58,30 @@ describe('authentication', () => {
     expect(second.body.data.id).toBe(first.body.data.id);
   });
 
+  it('re-links one profile when the same email returns via another provider', async () => {
+    // The realistic case this guards: someone signs up with an email and
+    // password, then later chooses "Continue with Google" with the same address.
+    // Supabase gives them a different auth id, but they are the same person and
+    // must keep the same cart and order history.
+    const emailPassword = testToken(testAuthUserId(11), 'same@example.com', 'Same Person');
+    const google = testToken(testAuthUserId(12), 'same@example.com', 'Same Person');
+
+    const first = await ctx.api
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${emailPassword}`)
+      .expect(200);
+
+    const second = await ctx.api
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${google}`)
+      .expect(200);
+
+    // Same profile row (so the same cart), now pointing at the new auth id.
+    expect(second.body.data.id).toBe(first.body.data.id);
+    expect(second.body.data.authUserId).toBe(testAuthUserId(12));
+    expect(second.body.data.email).toBe('same@example.com');
+  });
+
   it('keeps a signed-in shopper cart separate from any guest cart', async () => {
     const bearer = testToken(testAuthUserId(9), 'shopper@example.com');
     const product = await findProductBySlug(ctx.repositories, 'chocolate-delight-cake');

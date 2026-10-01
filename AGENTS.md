@@ -104,6 +104,42 @@ Express Commerce API  ──►  Supabase Postgres (service-role key, server-onl
 6. **All input is validated** with Zod at the route boundary; all errors are
    returned as one consistent JSON envelope.
 
+### Identity
+
+One identity provider, three ways in, **one** session afterwards:
+
+| Route | Frontend | Needs configuration? |
+| --- | --- | --- |
+| Email + password | `/auth/signin`, `/auth/signup` → `signInWithPassword` / `signUp` | **No** — email auth is on by default in every Supabase project |
+| Google | `signInWithOAuth` → `/auth/callback` | Yes — the Google provider must be enabled in Supabase |
+| Existing session | restored from cookies on load | No |
+
+- `AuthProvider` (`frontend/src/context/AuthProvider.tsx`) is the only place that
+  talks to Supabase Auth. It exposes `signInWithEmail`, `signUpWithEmail`,
+  `signInWithGoogle` and `signOut`, all returning the same `AuthResult` shape so
+  the pages render errors identically.
+- `AuthForm` (`frontend/src/components/AuthForm.tsx`) is shared by both auth
+  pages and drives everything from `mode`, so they cannot drift apart.
+- The API never mints tokens: it verifies whatever Supabase issued via
+  `supabase.auth.getUser(token)` (`auth/auth-verifier.ts`), then upserts the
+  local profile with `users.upsertFromIdentity`.
+- **Cross-provider re-linking is load-bearing.** Signing up with an email and
+  later continuing with Google gives Supabase two different `auth.users` rows
+  for one person. `upsertFromIdentity` therefore matches on `auth_user_id`
+  first and falls back to `email`, so the same profile (and therefore the same
+  cart and order history) is reused. Covered by
+  `backend/tests/auth.test.ts` → *"re-links one profile when the same email
+  returns via another provider"*.
+
+**The Google client secret deliberately does not live in `.env`.** It has to be
+held by the party that exchanges the authorisation code — Supabase. The only
+way to set it programmatically is the Supabase *Management* API
+(`PATCH /v1/projects/{ref}/config/auth`), which needs a personal access token
+(`sbp_…`), a completely separate credential class from the service-role key the
+app already holds. Storing a secret in the app's environment that the app never
+uses would be misleading, so the env files record the values and document the
+exact dashboard step instead.
+
 ---
 
 ## 4. Repository Layout
@@ -370,6 +406,11 @@ Legend: `[x]` done · `[~]` partial · `[ ]` not started
 - **No cart expiry.** `carts.status` supports `abandoned`, but nothing sweeps
   stale guest carts yet. A scheduled job should retire carts untouched for
   ~30 days.
+- **No password reset / forgotten password flow.** The sign-in and sign-up pages
+  work, but a shopper who forgets their password has no route to recovery.
+  Supabase already ships `resetPasswordForEmail` and an
+  `/auth/update-password` page; both are the obvious next step. Until then,
+  password reset can be done manually via the Supabase dashboard.
 - **No CMS/admin UI.** Products are managed through the Supabase dashboard or
   the seeder. A `/admin` area is the natural next feature.
 - **Contact form** posts nowhere yet; wire it to a Mailgun route or a Supabase
