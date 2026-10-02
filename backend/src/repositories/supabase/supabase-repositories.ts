@@ -689,6 +689,32 @@ class SupabaseCartRepository implements CartRepository {
     return mapCartItem(insert.data as CartItemDbRow);
   }
 
+  /**
+   * Single atomic write of the line. PostgREST turns this into
+   * `INSERT ... ON CONFLICT (cart_id, product_id) DO UPDATE`, which relies on
+   * the `unique (cart_id, product_id)` constraint from schema.sql, so a lost
+   * race can never duplicate a line.
+   */
+  async upsertItem(cartId: string, productId: string, quantity: number): Promise<CartItemRow> {
+    const row = ok<CartItemDbRow>(
+      await this.db
+        .from('cart_items')
+        .upsert(
+          {
+            cart_id: cartId,
+            product_id: productId,
+            quantity,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'cart_id,product_id' },
+        )
+        .select()
+        .single(),
+      'upsert cart item',
+    );
+    return mapCartItem(row);
+  }
+
   async setItemQuantity(
     cartId: string,
     itemId: string,
@@ -770,39 +796,40 @@ class SupabaseOrderRepository implements OrderRepository {
   constructor(private readonly db: SupabaseClient) {}
 
   async create(input: { order: NewOrderRow; items: NewOrderItemRow[] }) {
-    // Nested insert: PostgREST performs the parent insert and the child inserts
-    // inside a single transaction, so an order can never be persisted without
-    // its line items.
-    const payload = {
-      user_id: input.order.userId,
-      customer_name: input.order.customerName,
-      email: input.order.email,
-      phone: input.order.phone,
-      delivery_address: input.order.deliveryAddress,
-      delivery_city: input.order.deliveryCity,
-      delivery_notes: input.order.deliveryNotes ?? null,
-      subtotal: fromMinor(input.order.subtotal),
-      delivery_fee: fromMinor(input.order.deliveryFee),
-      total: fromMinor(input.order.total),
-      status: input.order.status ?? 'pending',
-      order_items: input.items.map((item) => ({
-        product_id: item.productId,
-        product_name: item.productName,
-        product_slug: item.productSlug,
-        product_image_url: item.productImageUrl,
-        unit_price: fromMinor(item.unitPrice),
-        quantity: item.quantity,
-        line_total: fromMinor(item.lineTotal),
-      })),
-    };
-
+    // The order and its line items go in as ONE database transaction, via
+    // public.create_order_with_items() (see db/schema.sql). PostgREST's nested
+    // insert is not usable on this deployment — it answers PGRST204, "Could not
+    // find the 'order_items' column of 'orders'" — and doing this as two
+    // statements would let a committed order survive a failed item insert.
+    //
     // `order_number` is deliberately omitted: the Postgres default assigns it
     // from a sequence, which cannot collide under concurrency.
-    const row = ok<OrderWithItems>(
-      await this.db.from('orders').insert(payload).select('*, order_items(*)').single(),
+    const created = ok<{ order: OrderDbRow; items: OrderItemDbRow[] }>(
+      await this.db.rpc('create_order_with_items', {
+        p_user_id: input.order.userId,
+        p_customer_name: input.order.customerName,
+        p_email: input.order.email,
+        p_phone: input.order.phone,
+        p_delivery_address: input.order.deliveryAddress,
+        p_delivery_city: input.order.deliveryCity,
+        p_delivery_notes: input.order.deliveryNotes ?? null,
+        p_subtotal: fromMinor(input.order.subtotal),
+        p_delivery_fee: fromMinor(input.order.deliveryFee),
+        p_total: fromMinor(input.order.total),
+        p_status: input.order.status ?? 'pending',
+        p_items: input.items.map((item) => ({
+          product_id: item.productId,
+          product_name: item.productName,
+          product_slug: item.productSlug,
+          product_image_url: item.productImageUrl,
+          unit_price: fromMinor(item.unitPrice),
+          quantity: item.quantity,
+          line_total: fromMinor(item.lineTotal),
+        })),
+      }),
       'create order',
     );
-    return mapOrder(row, row.order_items ?? []);
+    return mapOrder(created.order, created.items ?? []);
   }
 
   async listByUserId(userId: string) {

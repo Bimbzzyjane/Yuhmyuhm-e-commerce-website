@@ -99,19 +99,52 @@ cp frontend/.env.example frontend/.env.local
    `http://localhost:3000/auth/callback` to *Redirect URLs*.
 6. Copy the project URL and **anon** key into `frontend/.env.local`.
 
-### 4. Mailgun
+### 4. Mailgun (optional — order confirmation emails)
 
-Add your API key and sending domain to `backend/.env` and switch transport:
+The API boots and the whole test suite passes with **no Mailgun account**: the
+default `MAIL_TRANSPORT=console` prints the email to stdout instead of sending
+it. To send real mail, set these in `backend/.env`:
 
 ```env
 MAIL_TRANSPORT=mailgun
 MAILGUN_API_KEY=key-...
 MAILGUN_DOMAIN=mg.yourdomain.com
 MAILGUN_FROM_EMAIL=orders@yourdomain.com
+MAILGUN_FROM_NAME=Yuhmyuhm Catering Services   # optional, this is the default
+EMAIL_ORDER_NOTIFICATION_TO=orders@yourdomain.com   # optional team copy
 ```
 
-Domains on the EU region also need
-`MAILGUN_API_BASE=https://api.eu.mailgun.net`.
+All of these are read **only** from the backend environment. None of them
+belong in `frontend/.env.local` — that file is inlined into the browser bundle,
+and the storefront never sends mail.
+
+**Region.** `MAILGUN_API_BASE` defaults to `https://api.mailgun.net`. Domains
+on the EU region need `MAILGUN_API_BASE=https://api.eu.mailgun.net`. It is
+read from config rather than hard-coded, so switching regions is a one-line
+change.
+
+**Secrets.** `MAILGUN_API_KEY` is a live credential. Put it in `backend/.env`,
+which is gitignored, and nowhere else — not in `.env.example`, not in the docs,
+not in the frontend. `.env.example` documents the variable with a blank value.
+If a key ever leaks, revoke it in the Mailgun dashboard.
+
+**Sandbox domains.** A Mailgun *sandbox* domain can only send to addresses
+listed as authorized recipients, and each must click the activation link
+Mailgun sends before mail to that address is accepted. Anyone else fails with:
+
+```
+403 Domain ... is not allowed to send: Free accounts are for test purposes only.
+```
+
+That is expected on a free plan and is **not** a bug in this app. The
+confirmation is addressed to the *customer*, so on a sandbox it will only be
+accepted for recipient addresses you have authorized — upgrade the plan or use a
+paid domain before launch.
+
+**Email never affects checkout.** The order is stored first and the confirmation
+is sent only afterwards. A failed send is logged as
+`[orders] confirmation email failed for <order number>` and the checkout still
+returns `201`.
 
 ---
 
@@ -131,6 +164,10 @@ AGENTS.md   Architecture, conventions, decisions
 `GET /api/health` · `GET /api/products` · `GET /api/products/:idOrSlug` ·
 `GET /api/categories` · `GET|POST|PATCH|DELETE /api/cart[…/items]` ·
 `POST /api/cart/merge` · `GET /api/auth/me` · `POST|GET /api/orders`
+
+`GET /api/health` is a liveness probe only — `status`, `service` and
+`uptimeSeconds` — so it can stay public without advertising which datastore is
+in use, whether email is really being sent, or the shop's prices.
 
 Full request/response contracts, cart-resolution rules and error codes are in
 [AGENTS.md §6](./AGENTS.md).
@@ -153,6 +190,19 @@ Full request/response contracts, cart-resolution rules and error codes are in
   Because `GET /api/orders/:id` is owner-only, a guest cannot read an order back
   later — that keeps order ids unguessable rather than turning them into a public
   lookup. Signing in gives you `/orders` and a permanent history.
+- **Checkout is rate limited separately from browsing.** `POST /api/orders` gets
+  a deliberately small allowance (default 5/min) while the rest of the API keeps
+  a generous one (120/min). The limiter is mounted on that single route, so
+  throttling the one anonymous endpoint that writes a row, moves stock and sends
+  an email never affects ordinary shoppers.
+- **Deny-by-default covers functions and views, not just tables.** RLS has no
+  policies, and `schema.sql` additionally revokes `EXECUTE`/`SELECT` on every
+  helper — `create_order_with_items`, `next_order_number`, `set_updated_at` and
+  `catalogue_summary` — from `PUBLIC` *and* from `anon`/`authenticated`,
+  granting them only to the API's service role. Without that, the publishable key
+  could create orders or burn order numbers straight through `/rest/v1/rpc`.
+  Re-run the schema after pulling: `create or replace function` re-grants to
+  `PUBLIC` on every deploy.
 - **Secrets never reach the browser.** The service-role and Mailgun keys exist
   only in the API process; RLS is deny-by-default as a second line of defence.
 
@@ -205,6 +255,21 @@ and add `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`,
 `npm run build`, start `npm start`. Set every variable from
 `backend/.env.example`, with `NODE_ENV=production`,
 `BACKEND_DATA_BACKEND=supabase` and `MAIL_TRANSPORT=mailgun`.
+
+Also set **`TRUST_PROXY_HOPS` to match the host's real topology.** It is the one
+variable whose wrong value silently disables rate limiting:
+
+| Where the API runs | Value |
+| --- | --- |
+| `npm run dev`, or any host that reaches the API directly | `0` |
+| Exactly one proxy in front (typical Vercel / Render / Railway / Fly edge) | `1` — the default |
+| N chained proxies | `N` (max 10; anything larger fails at boot) |
+
+Set it too high and a caller can forge `X-Forwarded-For` and get a fresh
+rate-limit bucket on every request. Set it too low (or `0` behind a proxy) and
+every visitor shares a single bucket. `POST /api/orders` carries its own tight
+budget — `CHECKOUT_RATE_LIMIT_MAX_REQUESTS` per window, default **5/min** —
+while browsing uses `RATE_LIMIT_MAX_REQUESTS`, default **120/min**.
 
 Finally add the deployed storefront origin to `CORS_ORIGINS` on the API.
 

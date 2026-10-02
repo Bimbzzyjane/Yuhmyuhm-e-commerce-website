@@ -4,7 +4,7 @@
 > Update it at the end of every work session. It is the single source of truth
 > for architecture, conventions, decisions, and outstanding work.
 
-Last updated: 2026-10-01 · Maintained by: Cline (initial scaffold)
+Last updated: 2026-10-02 · Maintained by: Cline (deployment & abuse-protection hardening)
 
 ---
 
@@ -207,6 +207,58 @@ arithmetic in the service layer is done in **integer kobo** via
 `utils/money.ts` (`toMinor`/`fromMinor`) so no floating-point drift can occur;
 values are converted back to 2-decimal strings only at the DB/JSON boundary.
 
+### Atomic order creation (the one database function)
+
+`public.create_order_with_items(...)` is the **only** supported way to write an
+order. It takes the order columns plus a `jsonb` array of line items, inserts the
+parent, loops over the array inserting each child against the generated order id,
+and returns `{ order, items }` as one `jsonb` value. The repository calls it via
+`db.rpc('create_order_with_items', …)`.
+
+It exists because **PostgREST's nested insert is not available on this
+deployment.** Sending `order_items` as a key inside an `orders` insert returns
+`PGRST204 — Could not find the 'order_items' column of 'orders' in the schema
+cache`, which made every `POST /api/orders` fail with a 500. The two obvious
+alternatives are both worse:
+
+- *Two statements from Node* — not atomic. A committed order with no line items
+  can survive a failed second insert.
+- *Trimming the payload* — silent data loss: an order would exist with **zero**
+  lines and the customer billed for nothing.
+
+A Postgres function body runs inside one implicit transaction, so a failed item
+insert rolls the parent back with it. Ordering comes from
+`jsonb_array_elements`, which preserves array order, so the response matches what
+the service built.
+
+**Security.** `SECURITY INVOKER` (the default) — deliberately *not* `SECURITY
+DEFINER`. The API connects with the service role, which has `BYPASSRLS`, so no
+privilege elevation is needed and a bug in the function cannot be escalated.
+`search_path` is pinned to `public, pg_temp` anyway. Postgres grants `EXECUTE` on
+new functions to `PUBLIC` by default, which would let the browser's publishable
+key create orders straight through `/rest/v1/rpc`, so the function **revokes from
+`public` and grants only to `service_role`**. Keep that pairing if the signature
+ever changes. RLS is untouched.
+
+`order_number` is intentionally absent from the insert so the column default
+calls `next_order_number()` from the sequence — the same behaviour as before, and
+race-free. Note sequences are **not** transactional, so a rolled-back attempt
+still burns an order number; gaps in the numbering are expected, not a bug.
+
+**Testing split.** The repository contract is covered by
+`tests/supabase-orders.test.ts`, which drives the Supabase repository against a
+fake client (its `from()` throws, so a reintroduced nested insert fails loudly).
+Atomicity can only be proven against a real database, so it lives in
+`tests/supabase-orders.live.test.ts`, which is **opt-in** and skipped unless
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set:
+
+```bash
+cd backend && set -a && . ./.env && set +a && npx vitest run tests/supabase-orders.live.test.ts
+```
+
+That file cleans up after itself (`afterAll` deletes every row tagged with its
+marker email, cascading to `order_items`), so it is safe to re-run.
+
 ---
 
 ## 6. HTTP API
@@ -223,7 +275,7 @@ Base path `/api`. Every response is JSON. Errors use one envelope:
 
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
-| GET | `/api/health` | – | liveness + configured backend/transport |
+| GET | `/api/health` | – | **liveness only**: `{ status, service, uptimeSeconds }` |
 | GET | `/api/products` | – | `?category=&search=&featured=&limit=&offset=` → `{ data, pagination }` |
 | GET | `/api/products/:idOrSlug` | – | 404 if unknown/inactive |
 | GET | `/api/categories` | – | active categories with product counts |
@@ -237,6 +289,39 @@ Base path `/api`. Every response is JSON. Errors use one envelope:
 | POST | `/api/orders` | optional | `{ customer: {...} }` — server-repriced; emails confirmation |
 | GET | `/api/orders` | **yes** | current user's orders, newest first |
 | GET | `/api/orders/:id` | **yes** | owner-only, else `403` |
+
+**Rate limiting.** Two independent budgets, both configurable:
+
+| Limiter | Applies to | Env vars | Default |
+| --- | --- | --- | --- |
+| global | every request | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS` | 120 / min |
+| checkout | `POST /api/orders` **only** | `CHECKOUT_RATE_LIMIT_WINDOW_MS` / `CHECKOUT_RATE_LIMIT_MAX_REQUESTS` | 5 / min |
+
+Checkout gets its own much smaller allowance because it is the one anonymous
+endpoint that writes a row, moves stock and sends an email. The limiter is
+mounted on that single route (`routes/orders.routes.ts`), so browsing and the
+cart are never affected by it; the public reads (`GET /api/products`,
+`GET /api/cart`) stay on the global budget. Both limiters share one `onRateLimited`
+handler, so a rejection always looks the same: `429 RATE_LIMITED`.
+
+Client identity comes from Express's `req.ip`, which is only meaningful when
+`trust proxy` matches the real topology — hence `TRUST_PROXY_HOPS` (default `1`,
+meaning one proxy in front; set it to `0` when nothing is in front, or a caller
+can forge `X-Forwarded-For` and bypass the limit entirely). See §8 and the
+gotchas.
+
+**Health.** `GET /api/health` is public, so it answers liveness and nothing else:
+
+```json
+{ "status": "ok", "service": "yuhmyuhm-commerce-api", "uptimeSeconds": 15 }
+```
+
+It deliberately does **not** report the data backend, mail transport, currency,
+delivery fee, free-delivery threshold or environment. That told an anonymous
+caller which datastore to attack, whether email was really being sent, and the
+shop's prices. The same facts are printed by the startup banner in `server.ts`
+to the operator's console instead, and `GET /api/health`'s shape is pinned by
+`tests/health.test.ts`.
 
 **Cart resolution order** (middleware `resolveCartOwner`):
 verified user → user cart; otherwise `X-Guest-Cart-Id` (UUID) → guest cart;
@@ -328,7 +413,10 @@ running it twice is safe.
   in-memory repositories and a capturing mailer. No live network, no database.
 - Coverage focus, in priority order: money/pricing math, cart owner resolution
   and merge semantics, server-side repricing at checkout, order snapshot
-  immutability, stock/quantity limits, and the auth/authorisation guards.
+  immutability, stock/quantity limits, the auth/authorisation guards, and the
+  two rate-limit budgets with their trust-proxy behaviour
+  (`tests/rate-limit.test.ts`). `tests/health.test.ts` pins the public liveness
+  payload so internal fields cannot creep back into it.
 - Tests live in `backend/tests/*.test.ts`.
 - **The suite must pass with zero environment variables set.** If a test needs
   a secret, the design is wrong.
@@ -341,15 +429,21 @@ running it twice is safe.
 | Frontend types | `npm run typecheck` | 0 errors |
 | Lint (both) | `npm run lint` | 0 errors, 0 warnings |
 | Formatting | `npm run format:check` | all files clean |
-| API tests | `npm test` | **66 passed / 66** |
+| API tests | `npm test` | **122 passed / 4 skipped** (126) |
 | Build | `npm run build` | backend `dist/` + 15 Next.js routes |
 | Compiled API | `node backend/dist/server.js` | boots, `/api/health` 200 |
+| Public health shape | live probe | `{"status":"ok","service":…,"uptimeSeconds":…}` — no internal fields |
+| Checkout limiter | live probe (`CHECKOUT_RATE_LIMIT_MAX_REQUESTS=3`) | 3× `400` then `429`; `ratelimit: limit=3` header |
+| `X-Forwarded-For` spoof | live probe (`TRUST_PROXY_HOPS=0`) | forged header does **not** get a fresh bucket → still `429` |
+| `X-Forwarded-For` honoured | live probe (`TRUST_PROXY_HOPS=1`) | per-client buckets: `1.1.1.1` throttled, `2.2.2.2` allowed |
+| Bad `TRUST_PROXY_HOPS` | boot probe (`99`, `abc`) | fails at boot with `Invalid environment configuration` |
 | Catalogue imagery | live HTTP check | 28/28 image URLs return 200 |
 | Supabase schema | PostgREST probe | 7/7 tables present |
 | RLS deny-by-default | publishable-key probe | reads return `[]`, INSERT → `42501` |
 | Seed | `npm run seed` | 4 categories, 22 products; re-run is idempotent |
 | Catalogue via Supabase | `GET /api/products` | HTTP 200, total 22, filters/search OK |
 | Cart CRUD via Supabase | `POST/PATCH/DELETE /api/cart*` | 201/200, FK join back to products OK |
+| Mailgun credentials | `GET /v3/domains/<domain>` | HTTP 200, domain `active` (send is 403: sandbox recipient limit) |
 | Live walkthrough | see below | guest cart → order → email |
 
 The live walkthrough (against `BACKEND_DATA_BACKEND=memory`,
@@ -406,7 +500,7 @@ Legend: `[x]` done · `[~]` partial · `[ ]` not started
 - [x] Storefront: design system, home, category, product, cart, checkout,
       orders, auth pages
 - [x] Responsive pass
-- [x] Full verification: typecheck, lint, format, 61 API tests, production
+- [x] Full verification: typecheck, lint, format, 122 API tests, production
       build, compiled-server boot, live guest-order walkthrough
 - [ ] Deploy: backend host + Vercel; set `NEXT_PUBLIC_API_URL` to the
       live API origin and add it to `CORS_ORIGINS`
@@ -452,12 +546,60 @@ Legend: `[x]` done · `[~]` partial · `[ ]` not started
 - **Never ship an image whose licence you could not verify.** If a candidate
   cannot be credited, omit it and let `ProductImage` fall back to the branded
   placeholder. `stainless-piping-tip-set-24` is the precedent.
+- **The Supabase repository is not covered by `npm test`, and that is a real
+  gap.** Every test builds its app with `createMemoryRepositories()` (see
+  `tests/helpers/test-app.ts`), so the memory implementations are exercised and
+  the Supabase ones are not. That is precisely how `orders.create()` shipped a
+  broken PostgREST nested insert: 86 green tests, and a 500 on every single
+  `POST /api/orders`. The memory repository writes to a `Map`, so it structurally
+  cannot reproduce a PostgREST/Postgres failure. Any new or changed Supabase
+  repository method needs a direct test of that class — see
+  `tests/supabase-orders.test.ts` for the pattern (fake client, no credentials)
+  and `tests/supabase-orders.live.test.ts` for what only a real database can
+  prove. Do not assume a green suite covers the production data path.
+- **PostgREST features are not guaranteed by the schema.** Nested inserts
+  (`{ order_items: [...] }` inside an `orders` insert) fail with `PGRST204` here
+  even though the tables, the FK and read-side embeds (`select=*, order_items(*)`)
+  are all fine. A working read path says nothing about the write path — probe
+  them separately. Prefer a `plpgsql` function (`create_order_with_items`) when a
+  write needs to span tables atomically; see §5.
+- **Sequence values are not transactional.** A rolled-back order insert still
+  consumes a number from `order_number_seq`, so `YM-2026-0007` can follow
+  `YM-2026-0005` with no `0006` ever existing. That is expected, not a leak.
+- **The rate limiters do not switch themselves off for tests.** There is no
+  `skip: () => isTest` escape hatch (there used to be, and it meant the checkout
+  limiter was never actually exercised). Both budgets are live in every
+  environment, so `tests/helpers/test-app.ts` raises them to `100000` and any
+  test that *wants* a limit sets it explicitly via `createTestContext({ … })` —
+  see `tests/rate-limit.test.ts`. If a test that fires many requests starts
+  returning `429`, that is harness config, not flakiness.
+- **RLS is not the whole story for functions and views.** `schema.sql` also
+  revokes `EXECUTE`/`SELECT` from `PUBLIC` **and** from `anon`/`authenticated`
+  on `create_order_with_items`, `next_order_number`, `set_updated_at` and
+  `catalogue_summary`, granting them only to `service_role`. `revoke … from
+  public` alone is not enough on Supabase, because default privileges were
+  granted to `anon`/`authenticated` directly. Two consequences: (1) an
+  **existing** project needs this block re-run, not just a fresh one —
+  `create or replace function` re-grants `EXECUTE` to `PUBLIC` every time, so
+  the revokes must stay *after* the definitions; (2) `next_order_number()` is a
+  column `DEFAULT`, so the grant to `service_role` is what keeps order numbers
+  working — remove it and every `POST /api/orders` fails at the database while
+  `npm test` stays green, because the memory repositories never touch Postgres.
+- **`alter default privileges` is deliberately not used, so a NEW helper is born
+  public.** The revokes are per-object. A function or view added to `schema.sql`
+  later is callable through `/rest/v1/rpc` with the publishable key until someone
+  adds a matching revoke. Either add the revoke beside every new helper, or add
+  `alter default privileges in schema public revoke execute on functions from
+  public` (which only affects objects created *after* it runs).
 - **`tsx watch` does not restart on a `.env` change.** Editing
   `BACKEND_DATA_BACKEND` in `backend/.env` leaves the running dev API on the
-  previous backend, and `/api/health` will happily report the stale
-  `dataBackend`. A green storefront is not proof of which database it is
-  talking to — check `dataBackend` in the health response, and restart
-  `npm run dev` after switching.
+  previous backend, and nothing in `GET /api/health` will tell you — that
+  response is now deliberately liveness-only (see §6). A green storefront is not
+  proof of which database it is talking to: **check the startup banner** printed
+  by `server.ts` when the API boots (`Data backend   supabase`), and restart
+  `npm run dev` after switching. Symptom to watch for: a fresh `POST /api/orders`
+  failing with an FK/`PGRST` error because it is still writing to the old
+  datastore.
 - **`NEXT_PUBLIC_*` values are baked in at build time.** Changing one in
   `frontend/.env.local` needs a restart, and a stale
   `frontend/.next/cache` will keep serving old data. That is also why catalogue
@@ -492,6 +634,23 @@ Legend: `[x]` done · `[~]` partial · `[ ]` not started
   the seeder. A `/admin` area is the natural next feature.
 - **Contact form** posts nowhere yet; wire it to a Mailgun route or a Supabase
   table when a receiving inbox is decided.
+- **Mailgun sandbox domains reject real customers.** A `sandbox` domain can
+  only send to *authorized recipients* who have clicked Mailgun's activation
+  link; anything else returns
+  `403 Domain ... is not allowed to send: Free accounts are for test purposes only.`
+  The integration is still correct — the same call returns HTTP 200 on
+  `GET /v3/domains/<domain>`, which proves the key and domain are good, so do
+  not go chasing the app when this appears. `email/mailgun-mailer.ts` already
+  wraps the failure and `order.service.ts` catches it, so checkout still
+  returns `201` and the order is still stored. Confirmations are addressed to
+  the *customer*, so a paid domain is required before launch.
+- **The Mailgun API key must never be printed, logged, or documented.** It is
+  read only from `backend/.env` (gitignored) and reaches the wire as an
+  HTTP Basic credential. `tests/email.test.ts` asserts the key never appears in
+  a thrown error, and uses a literal fake key so the suite needs no account.
+  Note `MAILGUN_API_KEY` and `MAILGUN_DOMAIN` are **required** when
+  `MAIL_TRANSPORT=mailgun`, so the process fails at boot rather than at the
+  first checkout.
 - **Mailgun is called over HTTPS directly** (`email/mailgun-mailer.ts`) using
   Node's built-in `fetch` + `FormData`, rather than the `mailgun.js` SDK. That
   SDK is ESM-only and pulls in axios, which would force an ESM/CJS interop

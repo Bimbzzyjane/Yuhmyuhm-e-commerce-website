@@ -57,14 +57,15 @@ describe('health', () => {
     ctx = await createTestContext();
   });
 
-  it('reports the running configuration without needing auth', async () => {
+  it('answers without auth and exposes only minimal liveness detail', async () => {
     const response = await ctx.api.get('/api/health').expect(200);
 
+    // Before this fix the probe reported dataBackend, mailTransport, currency,
+    // deliveryFee and freeDeliveryThreshold to anyone who asked — and this test
+    // asserted it. The exact shape is now pinned in health.test.ts; here we only
+    // prove the probe is reachable before the auth middleware runs.
     expect(response.body.status).toBe('ok');
     expect(response.body.service).toBe('yuhmyuhm-commerce-api');
-    expect(response.body.dataBackend).toBe('memory');
-    expect(response.body.mailTransport).toBe('console');
-    expect(response.body.currency).toBe('NGN');
   });
 
   it('echoes a correlation id so a user can quote it to support', async () => {

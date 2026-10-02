@@ -387,6 +387,28 @@ class MemoryCartRepository implements CartRepository {
     return row;
   }
 
+  async upsertItem(cartId: string, productId: string, quantity: number): Promise<CartItemRow> {
+    const timestamp = nowIso();
+    const existing = findCartItem(this.db, cartId, productId);
+
+    if (existing) {
+      const updated: CartItemRow = { ...existing, quantity, updatedAt: timestamp };
+      this.db.cartItems.set(existing.id, updated);
+      return updated;
+    }
+
+    const row: CartItemRow = {
+      id: newId(),
+      cartId,
+      productId,
+      quantity,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.db.cartItems.set(row.id, row);
+    return row;
+  }
+
   async setItemQuantity(
     cartId: string,
     itemId: string,

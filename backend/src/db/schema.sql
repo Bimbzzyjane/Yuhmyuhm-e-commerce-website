@@ -12,6 +12,12 @@
 -- SECURITY: RLS is enabled on every table and NO policies are created, which
 -- is deny-by-default for `anon` and `authenticated`. Only the backend's
 -- service-role key can read or write. The storefront never queries tables.
+--
+-- RLS alone is not enough, though: functions and views carry their own
+-- privileges and Postgres + Supabase both hand those to the browser-facing
+-- roles by default. Every helper this file creates is therefore revoked from
+-- PUBLIC/anon/authenticated and granted only to service_role — see the
+-- "Function privileges" and "Verification helper" sections.
 -- ===========================================================================
 
 create extension if not exists "pgcrypto";
@@ -196,6 +202,161 @@ create table if not exists public.order_items (
 create index if not exists order_items_order_idx on public.order_items (order_id);
 
 -- ---------------------------------------------------------------------------
+-- Atomic order creation
+-- ---------------------------------------------------------------------------
+-- `SupabaseOrderRepository.create()` calls this instead of a nested PostgREST
+-- insert (`{ order_items: [...] }` inside an `orders` insert). Nested inserts
+-- are not available on this deployment — PostgREST answers PGRST204, "Could not
+-- find the 'order_items' column of 'orders' in the schema cache" — and a
+-- two-statement fallback would leave a committed order with no line items if
+-- the second statement failed. One function call gives real transactional
+-- atomicity: Postgres runs the whole body in a single implicit transaction, so
+-- a failed item insert rolls the order back with it and no orphaned order can
+-- survive. (Sequences are NOT transactional, so the burned order number is
+-- expected.)
+--
+-- SECURITY INVOKER, deliberately: the API connects with the service role, which
+-- has BYPASSRLS, so no privilege elevation is needed. EXECUTE is revoked from
+-- PUBLIC and from the browser-facing roles (otherwise the publishable key could
+-- create orders through /rest/v1/rpc) and granted only to service_role — the
+-- statements live together in "Function privileges" below. RLS stays
+-- deny-by-default; only the backend may call this.
+
+create or replace function public.create_order_with_items(
+  p_user_id          uuid,
+  p_customer_name    text,
+  p_email            text,
+  p_phone            text,
+  p_delivery_address text,
+  p_delivery_city    text,
+  p_delivery_notes   text,
+  p_subtotal         numeric,
+  p_delivery_fee     numeric,
+  p_total            numeric,
+  p_status           text,
+  p_items            jsonb
+)
+returns jsonb
+language plpgsql
+set search_path = public, pg_temp
+as $$
+declare
+  v_order  public.orders%rowtype;
+  v_item   public.order_items%rowtype;
+  v_source jsonb;
+  v_items  jsonb := '[]'::jsonb;
+begin
+  -- `order_number` is deliberately absent so the column default
+  -- (public.next_order_number()) assigns it from the sequence, exactly as it
+  -- did before this function existed, so concurrent checkouts cannot collide.
+  insert into public.orders (
+    user_id, customer_name, email, phone,
+    delivery_address, delivery_city, delivery_notes,
+    subtotal, delivery_fee, total, status
+  )
+  values (
+    p_user_id, p_customer_name, p_email, p_phone,
+    p_delivery_address, p_delivery_city, p_delivery_notes,
+    p_subtotal, p_delivery_fee, p_total, coalesce(p_status, 'pending')
+  )
+  returning * into v_order;
+
+  -- jsonb_array_elements preserves array order, so the caller's line order
+  -- survives the round trip and the response matches what the service built.
+  for v_source in
+    select value from jsonb_array_elements(coalesce(p_items, '[]'::jsonb))
+  loop
+    insert into public.order_items (
+      order_id, product_id, product_name, product_slug,
+      product_image_url, unit_price, quantity, line_total
+    )
+    values (
+      v_order.id,
+      nullif(v_source ->> 'product_id', '')::uuid,
+      v_source ->> 'product_name',
+      v_source ->> 'product_slug',
+      v_source ->> 'product_image_url',
+      (v_source ->> 'unit_price')::numeric,
+      (v_source ->> 'quantity')::integer,
+      (v_source ->> 'line_total')::numeric
+    )
+    returning * into v_item;
+
+    v_items := v_items || jsonb_build_array(to_jsonb(v_item));
+  end loop;
+
+  return jsonb_build_object('order', to_jsonb(v_order), 'items', v_items);
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Function privileges
+-- ---------------------------------------------------------------------------
+-- Postgres grants EXECUTE on every new function to PUBLIC, and Supabase's
+-- default privileges additionally hand it to `anon` and `authenticated` (the
+-- roles behind the browser's publishable key). Left alone, all three functions
+-- in this file would be callable straight through PostgREST's /rest/v1/rpc
+-- with the public key and no backend involvement whatsoever:
+--
+--   create_order_with_items(...) -> write orders and line items directly
+--   next_order_number()          -> burn order numbers indefinitely
+--   set_updated_at()             -> a trigger function, callable as an RPC
+--
+-- None of them is a public API, so all three are revoked from PUBLIC and from
+-- the browser-facing roles, then granted only to `service_role` — the role the
+-- Express API authenticates as. RLS is untouched.
+--
+-- Two subtleties keep this from breaking normal writes:
+--
+--   * `next_order_number()` is the column DEFAULT on `orders.order_number`, and
+--     a default expression is evaluated with the privileges of the INSERTING
+--     role. Orders are only ever inserted by service_role (inside
+--     create_order_with_items), so that grant is what keeps order numbers
+--     working at all.
+--   * `set_updated_at()` is a TRIGGER function. Postgres checks EXECUTE when a
+--     trigger is CREATED, not each time it fires, and the role creating the
+--     triggers below is the schema owner — so they keep firing for every
+--     writer. The grant to service_role is belt and braces.
+
+revoke all on function public.create_order_with_items(
+  uuid, text, text, text, text, text, text, numeric, numeric, numeric, text, jsonb
+) from public;
+
+grant execute on function public.create_order_with_items(
+  uuid, text, text, text, text, text, text, numeric, numeric, numeric, text, jsonb
+) to service_role;
+
+revoke all on function public.next_order_number() from public;
+revoke all on function public.set_updated_at() from public;
+
+grant execute on function public.next_order_number() to service_role;
+grant execute on function public.set_updated_at() to service_role;
+
+-- `revoke ... from public` does NOT remove a grant Supabase's default
+-- privileges gave to `anon`/`authenticated` directly, so those are revoked
+-- explicitly too. Those roles do not exist on a plain Postgres instance, so
+-- they are only touched when present — which keeps this file runnable against
+-- both.
+do $$
+declare
+  browser_role text;
+begin
+  foreach browser_role in array array['anon', 'authenticated']
+  loop
+    if exists (select 1 from pg_roles where rolname = browser_role) then
+      execute format(
+        'revoke all on function public.create_order_with_items(
+           uuid, text, text, text, text, text, text, numeric, numeric, numeric, text, jsonb
+         ) from %I',
+        browser_role
+      );
+      execute format('revoke all on function public.next_order_number() from %I', browser_role);
+      execute format('revoke all on function public.set_updated_at() from %I', browser_role);
+    end if;
+  end loop;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- updated_at triggers
 -- ---------------------------------------------------------------------------
 -- Postgres has no `create trigger if not exists`, so drop-then-create inside a
@@ -235,13 +396,50 @@ alter table public.orders     enable row level security;
 alter table public.order_items enable row level security;
 
 -- ---------------------------------------------------------------------------
--- Verification helper (optional): lists row counts so you can confirm a seed
+-- Verification helper (optional): row counts, for confirming a seed
 -- ---------------------------------------------------------------------------
-create or replace view public.catalogue_summary as
+-- NOT a public endpoint — it exists so an operator can sanity-check the
+-- catalogue from the dashboard. A bare view over RLS-protected tables is a
+-- classic way to leak data, so it is guarded twice:
+--
+--   1. `security_invoker = true` (Postgres 15+; every Supabase project
+--      qualifies) makes the view run with the CALLER's privileges and RLS
+--      instead of the view owner's. Without it the view would aggregate rows
+--      the caller is not allowed to select, silently bypassing the RLS above —
+--      and the counts themselves leak order volume. With it, service_role
+--      (which bypasses RLS by design) still sees true counts, while anyone else
+--      sees only what RLS permits.
+--   2. SELECT is revoked from the browser-facing roles outright, so the helper
+--      is unreachable with the publishable key even if the grants ever change.
+--
+-- The explicit revoke is needed because Supabase's default privileges grant to
+-- `anon`/`authenticated` directly, which `revoke ... from public` does not
+-- undo. Those roles are absent on plain Postgres, so they are only touched when
+-- present.
+
+create or replace view public.catalogue_summary
+  with (security_invoker = true)
+as
   select
     (select count(*) from public.categories) as categories,
     (select count(*) from public.products)   as products,
     (select count(*) from public.products where is_active) as active_products,
     (select count(*) from public.orders)     as orders;
+
+revoke all on public.catalogue_summary from public;
+
+do $$
+declare
+  browser_role text;
+begin
+  foreach browser_role in array array['anon', 'authenticated']
+  loop
+    if exists (select 1 from pg_roles where rolname = browser_role) then
+      execute format('revoke all on public.catalogue_summary from %I', browser_role);
+    end if;
+  end loop;
+end $$;
+
+grant select on public.catalogue_summary to service_role;
 
 

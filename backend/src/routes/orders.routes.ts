@@ -14,14 +14,20 @@ import { CheckoutSchema, OrderParamsSchema } from './schemas';
  *
  * No price ever comes from the request body; only the customer's contact and
  * delivery details do.
+ *
+ * `POST /` additionally carries its own stricter per-IP rate limit (see
+ * `middleware/rate-limit.ts`), because it is the only anonymous endpoint that
+ * writes a row, moves stock and sends mail.
  */
 export function createOrdersRouter(deps: {
   orders: OrderService;
   requireUser: RequestHandler;
+  /** Applied to `POST /` only — the read routes are cheap and unaffected. */
+  checkoutRateLimiter: RequestHandler;
 }): Router {
   const router = Router();
 
-  router.post('/', async (req, res) => {
+  router.post('/', deps.checkoutRateLimiter, async (req, res) => {
     const body = parseOrThrow(CheckoutSchema, req.body, 'Checkout details');
 
     const order = await deps.orders.placeOrder({

@@ -47,17 +47,53 @@ export function requireUuid(value: string | undefined | null, field: string): st
  *  - unit prices come from the catalogue at read time, never from the client.
  */
 export function createCartService({ repositories, config }: CartServiceDeps) {
-  async function resolveCart(owner: CartOwner): Promise<CartRow> {
+  /**
+   * Read-only half of `resolveCart`.
+   *
+   * Kept separate so `addItem` can look the product and the cart up together
+   * without creating a cart it might then not need: an unknown product must
+   * still 404 without leaving an empty cart behind.
+   */
+  async function lookupCart(
+    owner: CartOwner,
+  ): Promise<{ cart: CartRow | null; guestToken: string | null }> {
     if (owner.userId) {
-      const existing = await repositories.carts.findActiveByUserId(owner.userId);
-      return existing ?? repositories.carts.create({ userId: owner.userId });
+      return { cart: await repositories.carts.findActiveByUserId(owner.userId), guestToken: null };
     }
 
-    const token =
+    const guestToken =
       owner.guestToken && UUID_PATTERN.test(owner.guestToken) ? owner.guestToken : randomUUID();
 
-    const existing = await repositories.carts.findActiveByGuestToken(token);
-    return existing ?? repositories.carts.create({ guestToken: token });
+    return { cart: await repositories.carts.findActiveByGuestToken(guestToken), guestToken };
+  }
+
+  async function resolveCart(owner: CartOwner): Promise<CartRow> {
+    const { cart, guestToken } = await lookupCart(owner);
+    return cart ?? repositories.carts.create({ userId: owner.userId, guestToken });
+  }
+
+  /**
+   * Drops lines whose product has since been deleted or unpublished, so a cart
+   * can never show something that cannot be bought. Split out of `loadState`
+   * because the add-to-cart path already holds these rows and must not pay to
+   * re-read them just to prune.
+   */
+  async function pruneItems(
+    cart: CartRow,
+    items: CartItemRow[],
+    productsById: Map<string, ProductRow>,
+  ): Promise<CartItemRow[]> {
+    const live: CartItemRow[] = [];
+    for (const item of items) {
+      if (productsById.get(item.productId)?.isActive) {
+        live.push(item);
+        continue;
+      }
+      // The product was deleted or unpublished after it was added.
+      await repositories.carts.removeItem(cart.id, item.id);
+      productsById.delete(item.productId);
+    }
+    return live;
   }
 
   async function loadState(cart: CartRow, pruneStale: boolean): Promise<CartState> {
@@ -67,25 +103,19 @@ export function createCartService({ repositories, config }: CartServiceDeps) {
     const products = await repositories.products.findManyByIds(items.map((item) => item.productId));
     const productsById = new Map(products.map((product) => [product.id, product]));
 
-    const live: CartItemRow[] = [];
-    for (const item of items) {
-      const product = productsById.get(item.productId);
-      if (product?.isActive) {
-        live.push(item);
-        continue;
-      }
-      // The product was deleted or unpublished after it was added.
-      if (pruneStale) {
-        await repositories.carts.removeItem(cart.id, item.id);
-        productsById.delete(item.productId);
-      }
-    }
-
-    return { cart, items: live, productsById };
+    return {
+      cart,
+      items: pruneStale ? await pruneItems(cart, items, productsById) : items,
+      productsById,
+    };
   }
 
-  async function present(cart: CartRow): Promise<Cart> {
-    const state = await loadState(cart, true);
+  /**
+   * `preloaded` lets a caller that already holds the rows reuse them. It must
+   * already be pruned, so the behaviour matches calling `loadState` again.
+   */
+  async function present(cart: CartRow, preloaded?: CartState): Promise<Cart> {
+    const state = preloaded ?? (await loadState(cart, true));
     return toCartDto({
       cart: state.cart,
       items: state.items,
@@ -117,23 +147,71 @@ export function createCartService({ repositories, config }: CartServiceDeps) {
       return present(await resolveCart(owner));
     },
 
+    /**
+     * Adds a line and re-renders the cart.
+     *
+     * Structured around round trips, because every one of them is a network hop
+     * to the database (~200ms each against a remote Supabase project). The three
+     * stages below are the minimum this can be done in:
+     *
+     *   1. product lookup || cart lookup   (independent reads)
+     *   2. list the cart's lines
+     *   3. upsert the line || touch the cart || price the other lines
+     *
+     * The old version took eight sequential trips: it read the cart twice (once
+     * for the stock check, again to render) and did a read-then-write on the
+     * cart item. Nothing here caches, so the cart is still read live on every
+     * request and prices still come from the catalogue.
+     */
     async addItem(owner: CartOwner, productId: string, quantity: number): Promise<Cart> {
-      const product = await repositories.products.findById(productId);
+      const [product, lookup] = await Promise.all([
+        repositories.products.findById(productId),
+        lookupCart(owner),
+      ]);
       if (!product || !product.isActive) {
+        // Still ahead of creating the cart, so a bad product leaves no orphan.
         throw new NotFoundError('We could not find that product.');
       }
 
-      const cart = await resolveCart(owner);
-      const existing = (await repositories.carts.listItems(cart.id)).find(
-        (item) => item.productId === productId,
-      );
+      const cart =
+        lookup.cart ??
+        (await repositories.carts.create({ userId: owner.userId, guestToken: lookup.guestToken }));
+
+      // One read serves both the stock check and the response below, so the
+      // cart is listed exactly once per request.
+      const before = await repositories.carts.listItems(cart.id);
+      const existing = before.find((item) => item.productId === productId);
       const requested = (existing?.quantity ?? 0) + quantity;
 
       assertWithinLimits(product, requested);
 
-      await repositories.carts.addItem(cart.id, productId, quantity);
-      await repositories.carts.touch(cart.id);
-      return present(cart);
+      // Writing a line cannot change WHICH products the cart holds, so pricing
+      // the other lines does not have to wait for the write to land. `line` is
+      // the only new quantity in the cart, and `line` is returned by the upsert.
+      const otherProductIds = [
+        ...new Set(
+          before.filter((item) => item.productId !== productId).map((item) => item.productId),
+        ),
+      ];
+
+      const [line, , otherProducts] = await Promise.all([
+        repositories.carts.upsertItem(cart.id, productId, requested),
+        repositories.carts.touch(cart.id),
+        repositories.products.findManyByIds(otherProductIds),
+      ]);
+
+      const productsById = new Map<string, ProductRow>([[product.id, product]]);
+      for (const other of otherProducts) productsById.set(other.id, other);
+
+      const items = existing
+        ? before.map((item) => (item.productId === productId ? line : item))
+        : [...before, line];
+
+      return present(cart, {
+        cart,
+        items: await pruneItems(cart, items, productsById),
+        productsById,
+      });
     },
 
     async updateItem(owner: CartOwner, itemId: string, quantity: number): Promise<Cart> {

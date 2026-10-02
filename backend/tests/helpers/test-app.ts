@@ -71,12 +71,28 @@ export interface TestContext {
   api: ReturnType<typeof supertest>;
 }
 
-export async function createTestContext(overrides: NodeJS.ProcessEnv = {}): Promise<TestContext> {
+/**
+ * `mailerOverride` swaps in a different transport while `ctx.mailer` keeps
+ * pointing at the capturing one, so a test can prove that a *failing* mailer
+ * neither breaks checkout nor hides the captured messages.
+ */
+export async function createTestContext(
+  overrides: NodeJS.ProcessEnv = {},
+  mailerOverride?: Mailer,
+): Promise<TestContext> {
   const config = loadConfig({
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
     BACKEND_DATA_BACKEND: 'memory',
     MAIL_TRANSPORT: 'console',
+    // The rate limiters are NOT disabled under test — a limiter that skips
+    // itself is a limiter nobody tests. Instead the harness lifts both budgets
+    // far above what any suite consumes: `orders.test.ts` alone issues a dozen
+    // checkouts from one address, which a production-sized budget of 5/min
+    // would (correctly) reject. `tests/rate-limit.test.ts` sets these back down
+    // to a deliberately tiny value so it can assert a real 429.
+    RATE_LIMIT_MAX_REQUESTS: '100000',
+    CHECKOUT_RATE_LIMIT_MAX_REQUESTS: '100000',
     ...overrides,
   });
 
@@ -86,7 +102,7 @@ export async function createTestContext(overrides: NodeJS.ProcessEnv = {}): Prom
   const app = createApp({
     config,
     repositories,
-    mailer,
+    mailer: mailerOverride ?? mailer,
     authVerifier: createStubAuthVerifier(),
   });
 

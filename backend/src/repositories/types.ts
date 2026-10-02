@@ -236,6 +236,17 @@ export interface CartRepository {
   listItems(cartId: string): Promise<CartItemRow[]>;
   /** Adds to the existing line for that product, or inserts a new one. */
   addItem(cartId: string, productId: string, quantity: number): Promise<CartItemRow>;
+  /**
+   * Writes `quantity` as the line's new absolute value, inserting the line when
+   * it does not exist yet.
+   *
+   * Distinct from {@link addItem} on purpose: `addItem` needs a read first
+   * because it increments in the service layer, which costs two round trips.
+   * This is a single atomic statement, so the caller must have already read
+   * the current quantity. It exists for the hot add-to-cart path, where a
+   * latency-bound write is worth the trade.
+   */
+  upsertItem(cartId: string, productId: string, quantity: number): Promise<CartItemRow>;
   setItemQuantity(cartId: string, itemId: string, quantity: number): Promise<CartItemRow | null>;
   removeItem(cartId: string, itemId: string): Promise<boolean>;
   clearItems(cartId: string): Promise<number>;

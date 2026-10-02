@@ -8,7 +8,7 @@ import type { Mailer } from './email';
 import { createAuthMiddleware } from './middleware/auth';
 import { resolveCartOwner } from './middleware/cart-owner';
 import { createErrorHandler, notFoundHandler } from './middleware/error';
-import { createRateLimiter } from './middleware/rate-limit';
+import { createCheckoutRateLimiter, createRateLimiter } from './middleware/rate-limit';
 import { attachRequestId } from './middleware/request-id';
 import type { Repositories } from './repositories/types';
 import { createAuthRouter } from './routes/auth.routes';
@@ -70,8 +70,14 @@ export function createApp({
 
   // Do not advertise the framework.
   app.disable('x-powered-by');
-  // Behind a proxy (Vercel/Render/Railway) so rate limiting sees the real client.
-  app.set('trust proxy', 1);
+  // Behind a proxy (Vercel/Render/Railway) so rate limiting can see the real
+  // client. The hop count is configuration because it must match the actual
+  // topology: trusting one hop too many lets a client forge its own address in
+  // `X-Forwarded-For` and slip past the limiter, while trusting zero when a
+  // proxy really is present makes every request look like it came from the
+  // proxy. `0` (TRUST_PROXY_HOPS=0) therefore means "no proxy, ignore the
+  // header" and is the right setting for local development.
+  app.set('trust proxy', config.trustProxyHops);
 
   app.use(helmet());
   app.use(
@@ -96,17 +102,19 @@ export function createApp({
   const cart = createCartService({ repositories, config });
   const orders = createOrderService({ repositories, config, mailer, cartService: cart });
   const { identify, requireUser } = createAuthMiddleware({ verifier: authVerifier, repositories });
+  // Checkout gets a second, stricter limiter on top of the global one.
+  const checkoutRateLimiter = createCheckoutRateLimiter(config);
 
   // --- api -----------------------------------------------------------------
   // Health is registered before auth so probes never depend on a token.
-  app.use('/api', createHealthRouter(config));
+  app.use('/api', createHealthRouter());
   app.use(identify);
   app.use(resolveCartOwner);
 
   app.use('/api', createCatalogRouter(catalog));
   app.use('/api/cart', createCartRouter(cart));
   app.use('/api/auth', createAuthRouter({ requireUser }));
-  app.use('/api/orders', createOrdersRouter({ orders, requireUser }));
+  app.use('/api/orders', createOrdersRouter({ orders, requireUser, checkoutRateLimiter }));
 
   // --- fallbacks -----------------------------------------------------------
   app.use(notFoundHandler);

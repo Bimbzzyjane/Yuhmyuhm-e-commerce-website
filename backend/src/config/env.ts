@@ -49,8 +49,43 @@ const EnvSchema = z
     CURRENCY: z.string().length(3).default(DEFAULT_CURRENCY),
 
     MAX_ITEM_QUANTITY: z.coerce.number().int().min(1).max(999).default(20),
+
+    /**
+     * How many reverse-proxy hops to trust when resolving the client address
+     * for rate limiting.
+     *
+     * `0` disables proxy trust entirely — correct for local development and for
+     * any deployment where the API is reached directly, because `X-Forwarded-For`
+     * is caller-controlled there and trusting it would let one client bypass the
+     * limiter by inventing a new address on every request.
+     *
+     * Any non-zero value MUST match the real production topology: it is the
+     * number of proxies in front of the API (a single Vercel/Render/Railway
+     * edge is 1). Set it too high and Express walks one hop too far into a
+     * header the client can forge; too low and every request looks like it came
+     * from the proxy, so the limit is shared across all shoppers.
+     *
+     * The bound is deliberately small: no realistic deployment stacks ten
+     * trusted proxies, and a typo like `TRUST_PROXY_HOPS=99` should fail at
+     * boot rather than silently trust everything.
+     */
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
+
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
     RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().min(1).default(120),
+
+    /**
+     * A separate, much tighter budget for `POST /api/orders`.
+     *
+     * Checkout is the one anonymous endpoint that writes a row, decrements
+     * stock and sends an email, so it deserves its own limit instead of being
+     * lumped in with browsing. Five per minute comfortably covers a genuine
+     * shopper (even one correcting a typo) while blunting scripted abuse, and
+     * it is deliberately not applied to the catalogue endpoints so ordinary
+     * browsing is never throttled.
+     */
+    CHECKOUT_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
+    CHECKOUT_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().min(1).default(5),
 
     LOG_LEVEL: z.enum(['silent', 'info', 'debug']).default('info'),
   })
@@ -124,7 +159,14 @@ export interface AppConfig {
   /** Integer minor units (kobo). Orders at or above this subtotal ship free. */
   freeDeliveryThreshold: number;
   maxItemQuantity: number;
+  /**
+   * Reverse-proxy hops to trust. `0` = trust nothing (see `TRUST_PROXY_HOPS`).
+   * Passed straight to `app.set('trust proxy', …)`.
+   */
+  trustProxyHops: number;
   rateLimit: { windowMs: number; max: number };
+  /** Stricter, separate budget for `POST /api/orders` only. */
+  checkoutRateLimit: { windowMs: number; max: number };
 }
 
 /** Parses a raw environment into the typed config, or throws a helpful error. */
@@ -182,7 +224,12 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     deliveryFee: toMinor(env.DEFAULT_DELIVERY_FEE),
     freeDeliveryThreshold: toMinor(env.FREE_DELIVERY_THRESHOLD),
     maxItemQuantity: env.MAX_ITEM_QUANTITY,
+    trustProxyHops: env.TRUST_PROXY_HOPS,
     rateLimit: { windowMs: env.RATE_LIMIT_WINDOW_MS, max: env.RATE_LIMIT_MAX_REQUESTS },
+    checkoutRateLimit: {
+      windowMs: env.CHECKOUT_RATE_LIMIT_WINDOW_MS,
+      max: env.CHECKOUT_RATE_LIMIT_MAX_REQUESTS,
+    },
   }) satisfies AppConfig;
 }
 
