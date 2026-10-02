@@ -76,6 +76,15 @@
 
   --container: 1200px;
   --header-height: 78px;
+
+  /* Total vertical space the sticky header occupies. It is the bar alone on
+     desktop, but the bar plus the collapsed nav row on narrow screens, so
+     anything that sticks below the header must clear this value rather than
+     --header-height. Overridden in the <=980px block. */
+  --header-sticky-offset: var(--header-height);
+  /* Height of the collapsed nav row introduced at <=980px (40px link box plus
+     its 12px bottom padding plus the 1px top border). */
+  --collapsed-nav-height: 53px;
 }
 
 /* ==========================================================================
@@ -290,10 +299,16 @@ textarea {
 }
 
 @media (max-width: 720px) {
+  /*
+   * Two-up on a phone as soon as a card can hold a readable price and the
+   * full-width "Add to cart" button (168px card). `auto-fill` + a `1fr` max
+   * means narrower devices fall back to a single column on their own, so this
+   * can never produce a horizontal scrollbar.
+   */
   .grid--4,
   .grid--3,
   .grid--2 {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   }
   .section {
     padding: var(--space-7) 0;
@@ -560,6 +575,11 @@ textarea {
 }
 
 @media (max-width: 980px) {
+  :root {
+    /* The collapsed nav row is added below the bar, so sticky elements have to
+       clear the taller header. */
+    --header-sticky-offset: calc(var(--header-height) + var(--collapsed-nav-height));
+  }
   .header__nav {
     display: none;
   }
@@ -1401,11 +1421,20 @@ textarea {
   color: var(--color-ink);
 }
 
+/* 36px is comfortable with a mouse but a poor tap target on a phone, and these
+   are the only way to change quantity. Touch only, so desktop is untouched. */
+@media (pointer: coarse) {
+  .qty__btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 /* Summary card ------------------------------------------------------------ */
 
 .summary {
   position: sticky;
-  top: calc(var(--header-height) + var(--space-4));
+  top: calc(var(--header-sticky-offset) + var(--space-4));
   padding: var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
@@ -2042,6 +2071,15 @@ a.product-card__media {
 .password-field__toggle:hover {
   background: var(--color-cream);
   color: var(--color-ink);
+}
+
+/* Deepens the tap area vertically only — the horizontal padding, and therefore
+   the 74px right padding reserved for it above, is deliberately unchanged. */
+@media (pointer: coarse) {
+  .password-field__toggle {
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-3);
+  }
 }
 
 /* "Don't have an account yet? Create one" */
