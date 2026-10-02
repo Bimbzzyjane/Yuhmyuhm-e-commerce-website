@@ -30,7 +30,7 @@ stay a pure view layer.
 Requires **Node 20.9+** (developed on Node 24).
 
 ```bash
-git clone <your-repo-url>
+git clone git https://github.com/Bimbzzyjane/Yuhmyuhm-e-commerce-website.git
 cd "E-COMMERCE WEBSITE"
 npm install
 ```
