@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Yuhmyuhm",
+    "slug": "yuhmyuhm",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "yuhmyuhm",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yuhmyuhm.catering"
+    },
+    "android": {
+      "package": "com.yuhmyuhm.catering",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2a1a10"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f9ed5153-cf45-43f5-bb1d-9ae46c72c343"
+      }
+    }
+  }
+}
