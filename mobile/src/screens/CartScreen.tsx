@@ -192,14 +192,19 @@ export function CartScreen({ navigation }: TabScreenProps<'Cart'>) {
               <Text style={styles.freeNote}>Your order qualifies for free delivery.</Text>
             ) : null}
 
+            <Button
+              label={`Checkout · ${cart.totalLabel}`}
+              onPress={() => navigation.navigate('Checkout')}
+            />
+
             <Text style={styles.note}>
-              Checkout arrives in a later phase. Your cart lives on our servers, so it will be waiting
-              on the website and on your other device.
+              Your cart lives on our servers, so it will be waiting on the website and on your other
+              device.
             </Text>
 
             <Button
               label="Empty cart"
-              variant="secondary"
+              variant="ghost"
               busy={clearing || mutating}
               onPress={() => void handleClear()}
             />

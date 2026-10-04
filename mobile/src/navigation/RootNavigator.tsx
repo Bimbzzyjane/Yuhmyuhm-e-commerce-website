@@ -6,7 +6,9 @@ import type { ComponentProps } from 'react';
 import { useCart } from '../context/CartProvider';
 import { AccountScreen } from '../screens/AccountScreen';
 import { CartScreen } from '../screens/CartScreen';
+import { CheckoutScreen } from '../screens/CheckoutScreen';
 import { ConnectionStatusScreen } from '../screens/ConnectionStatusScreen';
+import { OrderConfirmationScreen } from '../screens/OrderConfirmationScreen';
 import { ShopScreen } from '../screens/ShopScreen';
 import { SignInScreen } from '../screens/SignInScreen';
 import { SignUpScreen } from '../screens/SignUpScreen';
@@ -103,6 +105,12 @@ export function RootNavigator() {
         <RootStack.Screen name="Tabs" component={MainTabs} options={{ headerShown: false }} />
         <RootStack.Screen name="SignIn" component={SignInScreen} options={{ title: 'Sign in' }} />
         <RootStack.Screen name="SignUp" component={SignUpScreen} options={{ title: 'Create account' }} />
+        <RootStack.Screen name="Checkout" component={CheckoutScreen} options={{ title: 'Checkout' }} />
+        <RootStack.Screen
+          name="OrderConfirmation"
+          component={OrderConfirmationScreen}
+          options={{ title: 'Order placed', headerBackVisible: false }}
+        />
         <RootStack.Screen
           name="Diagnostics"
           component={ConnectionStatusScreen}

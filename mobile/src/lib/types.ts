@@ -136,3 +136,75 @@ export interface Paginated<T> {
   data: T[];
   pagination: Pagination;
 }
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+export type OrderStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'processing'
+  | 'delivered'
+  | 'cancelled';
+
+export interface OrderLine {
+  id: string;
+  productId: string | null;
+  /** Frozen at purchase time — later catalogue edits must not change this. */
+  productName: string;
+  productSlug: string | null;
+  productImageUrl: string | null;
+  /** Integer kobo. */
+  unitPrice: number;
+  unitPriceLabel: string;
+  quantity: number;
+  lineTotal: number;
+  lineTotalLabel: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Order {
+  id: string;
+  /** Human reference the customer quotes, e.g. `YM-2026-0001`. */
+  orderNumber: string;
+  userId: string | null;
+  customerName: string;
+  email: string;
+  phone: string;
+  deliveryAddress: string;
+  deliveryCity: string;
+  deliveryNotes: string | null;
+  /** Integer kobo. */
+  subtotal: number;
+  subtotalLabel: string;
+  deliveryFee: number;
+  deliveryFeeLabel: string;
+  total: number;
+  totalLabel: string;
+  currency: string;
+  status: OrderStatus;
+  items: OrderLine[];
+  itemCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * `POST /api/orders` payload.
+ *
+ * Contact and delivery details ONLY — no price is ever submitted, because the API
+ * re-reads every product and recomputes the totals itself. Field names mirror the
+ * backend's `CheckoutSchema` exactly.
+ */
+export interface CheckoutPayload {
+  customer: {
+    name: string;
+    email: string;
+    phone: string;
+    address: string;
+    city: string;
+    notes?: string;
+  };
+}

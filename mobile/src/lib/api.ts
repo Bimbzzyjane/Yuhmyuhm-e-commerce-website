@@ -1,5 +1,12 @@
 import { ENV, apiUrlIssue } from '../config/env';
-import type { Cart, Paginated, Product, UserProfile } from './types';
+import type {
+  Cart,
+  CheckoutPayload,
+  Order,
+  Paginated,
+  Product,
+  UserProfile,
+} from './types';
 
 /**
  * Typed API client for the EXISTING Yuhmyuhm Express API.
@@ -272,5 +279,23 @@ export const api = {
       method: 'POST',
       body: { guestCartId },
       accessToken,
+    }).then((response) => response.data),
+
+  /**
+   * `POST /api/orders` — place an order.
+   *
+   * Auth is optional (the API accepts a guest checkout), so the same credentials
+   * shape as the cart routes is used: the Supabase token when signed in, the
+   * guest cart header otherwise. There is deliberately no payment step — the shop
+   * takes payment directly with the customer.
+   *
+   * The backend re-prices the cart, stores the order, clears the cart, decrements
+   * stock and sends the confirmation emails. The response is the created order.
+   */
+  placeOrder: (payload: CheckoutPayload, credentials: CartCredentials) =>
+    apiRequest<{ data: Order }>('/api/orders', {
+      method: 'POST',
+      body: payload,
+      ...credentials,
     }).then((response) => response.data),
 };

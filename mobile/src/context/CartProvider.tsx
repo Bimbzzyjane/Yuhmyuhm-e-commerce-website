@@ -55,6 +55,12 @@ interface CartContextValue {
   removeItem: (itemId: string) => Promise<MutationResult>;
   clear: () => Promise<MutationResult>;
   refresh: () => Promise<void>;
+  /**
+   * The credentials the cart requests already use: the Supabase access token when
+   * signed in, otherwise the guest cart header. Exposed so checkout sends the order
+   * under exactly the same identity rather than re-deriving it.
+   */
+  credentials: () => Promise<CartCredentials>;
 }
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -207,6 +213,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       removeItem,
       clear,
       refresh,
+      credentials,
     }),
     [
       cart,
@@ -219,6 +226,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       removeItem,
       clear,
       refresh,
+      credentials,
     ],
   );
 

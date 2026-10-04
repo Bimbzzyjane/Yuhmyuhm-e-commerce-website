@@ -20,11 +20,12 @@ import { type } from '../theme/typography';
  * on a spinner.
  */
 export function SignUpScreen({ navigation }: RootScreenProps<'SignUp'>) {
-  const { signUp, configured } = useAuth();
+  const { signUp, signInWithGoogle, configured } = useAuth();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -58,6 +59,31 @@ export function SignUpScreen({ navigation }: RootScreenProps<'SignUp'>) {
       setError(caught instanceof Error ? caught.message : 'We could not create your account.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * Google can also CREATE the account: Supabase provisions the user from the
+   * Google identity on first sign-in, so no separate password is ever asked for or
+   * needed. It is the same `signInWithGoogle()` the Sign In screen uses.
+   */
+  const handleGoogle = async () => {
+    if (googleBusy) return;
+
+    setGoogleBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await signInWithGoogle();
+      if (result.ok) {
+        navigation.goBack();
+        return;
+      }
+      if (!result.cancelled) setError(result.message ?? 'We could not create your account.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'We could not create your account.');
+    } finally {
+      setGoogleBusy(false);
     }
   };
 
@@ -112,6 +138,19 @@ export function SignUpScreen({ navigation }: RootScreenProps<'SignUp'>) {
             ) : null}
 
             <Button label="Create account" busy={busy} onPress={() => void submit()} />
+
+            <View style={styles.divider}>
+              <View style={styles.rule} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.rule} />
+            </View>
+
+            <Button
+              label="Continue with Google"
+              variant="secondary"
+              busy={googleBusy}
+              onPress={() => void handleGoogle()}
+            />
           </Card>
 
           <View style={styles.footer}>
@@ -159,5 +198,19 @@ const styles = StyleSheet.create({
   },
   footerText: {
     ...type.body,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+  },
+  rule: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  dividerText: {
+    ...type.inputLabel,
+    color: colors.inkFaint,
   },
 });
