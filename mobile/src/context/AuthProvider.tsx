@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api, apiErrorMessage } from '../lib/api';
+import { signInWithGoogle as runGoogleSignIn } from '../lib/googleAuth';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import type { UserProfile } from '../lib/types';
 
@@ -34,6 +35,8 @@ export interface AuthResult {
   message?: string;
   /** True when the account was created but the project requires email confirmation. */
   needsEmailConfirmation?: boolean;
+  /** True when the shopper dismissed the Google browser, so nothing went wrong. */
+  cancelled?: boolean;
 }
 
 export const AUTH_DISABLED_MESSAGE =
@@ -55,6 +58,7 @@ const AUTH_ERROR_MESSAGES: ReadonlyArray<[RegExp, string]> = [
   [/unable to validate email|invalid email/i, 'That email address does not look valid.'],
   [/email not confirmed/i, 'Please confirm your email address first — check your inbox.'],
   [/rate limit|too many requests/i, 'Too many attempts. Please wait a moment and try again.'],
+  [/access_denied|popup closed/i, 'Google sign-in was cancelled.'],
 ];
 
 function friendlyAuthMessage(raw: string, fallback: string): string {
@@ -82,6 +86,11 @@ interface AuthContextValue {
   profileError: string | null;
   signIn: (email: string, password: string) => Promise<AuthResult>;
   signUp: (input: { email: string; password: string; fullName?: string }) => Promise<AuthResult>;
+  /**
+   * Google OAuth, handled by Supabase against the same project the website uses,
+   * so a Google account resolves to the same backend profile — and the same cart.
+   */
+  signInWithGoogle: () => Promise<AuthResult>;
   signOut: () => Promise<void>;
   /** Re-runs the `/api/auth/me` lookup (for a "retry" on the Account screen). */
   refreshProfile: () => Promise<void>;
@@ -225,6 +234,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  /**
+   * Google OAuth.
+   *
+   * The browser round-trip lives in `lib/googleAuth.ts`; this only adapts its
+   * result to the same `AuthResult` shape the screens already handle, so the
+   * existing error presentation is reused verbatim.
+   *
+   * Nothing is set locally: establishing the session makes Supabase emit
+   * `onAuthStateChange`, which updates `session`/`accessToken` above and in turn
+   * re-runs the `/api/auth/me` lookup and the cart merge.
+   */
+  const signInWithGoogle = useCallback(async (): Promise<AuthResult> => {
+    const result = await runGoogleSignIn();
+    return {
+      ok: result.ok,
+      message: result.message
+        ? friendlyAuthMessage(result.message, result.message)
+        : undefined,
+      cancelled: result.cancelled,
+    };
+  }, []);
+
   const signOut = useCallback(async () => {
     // Clears the Supabase session (and its AsyncStorage entry) but leaves the
     // account's server-side cart untouched.
@@ -256,6 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profileError,
       signIn,
       signUp,
+      signInWithGoogle,
       signOut,
       refreshProfile,
     }),
@@ -269,6 +301,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profileError,
       signIn,
       signUp,
+      signInWithGoogle,
       signOut,
       refreshProfile,
     ],

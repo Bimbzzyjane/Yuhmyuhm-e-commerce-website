@@ -20,10 +20,11 @@ import { type } from '../theme/typography';
  * merges any guest cart, and loads the account cart.
  */
 export function SignInScreen({ navigation }: RootScreenProps<'SignIn'>) {
-  const { signIn, configured } = useAuth();
+  const { signIn, signInWithGoogle, configured } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
@@ -47,6 +48,30 @@ export function SignInScreen({ navigation }: RootScreenProps<'SignIn'>) {
       setError(caught instanceof Error ? caught.message : 'We could not sign you in.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * Google sign-in opens the system browser, so the app is backgrounded for most
+   * of this. A cancelled attempt is not an error, so the form is simply left
+   * untouched rather than showing a message.
+   */
+  const handleGoogle = async () => {
+    if (googleBusy) return;
+
+    setGoogleBusy(true);
+    setError(null);
+    try {
+      const result = await signInWithGoogle();
+      if (result.ok) {
+        navigation.goBack();
+        return;
+      }
+      if (!result.cancelled) setError(result.message ?? 'We could not sign you in.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'We could not sign you in.');
+    } finally {
+      setGoogleBusy(false);
     }
   };
 
@@ -89,6 +114,19 @@ export function SignInScreen({ navigation }: RootScreenProps<'SignIn'>) {
             ) : null}
 
             <Button label="Sign in" busy={busy} onPress={() => void submit()} />
+
+            <View style={styles.divider}>
+              <View style={styles.rule} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.rule} />
+            </View>
+
+            <Button
+              label="Continue with Google"
+              variant="secondary"
+              busy={googleBusy}
+              onPress={() => void handleGoogle()}
+            />
           </Card>
 
           <View style={styles.footer}>
@@ -132,5 +170,19 @@ const styles = StyleSheet.create({
   },
   footerText: {
     ...type.body,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+  },
+  rule: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  dividerText: {
+    ...type.inputLabel,
+    color: colors.inkFaint,
   },
 });
